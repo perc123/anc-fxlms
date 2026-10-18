@@ -4,13 +4,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 
-FloatArray = NDArray[np.fleat64] 
+FloatArray = NDArray[np.float64] 
 
 
 def generate_tone_mixture(
         sample_rate_hz: int,
         duration_s: float,
-        tones: Sequence[dict[str, float]]
+        tones: Sequence[dict[str, float]],
         white_noise_std: float = 0.0,
         seed: int = 42,
 ) -> FloatArray:
