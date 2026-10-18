@@ -1,0 +1,34 @@
+experiment:
+  name: step1_fixed_baseline
+  seed: 42
+
+signal:
+  sample_rate_hz: 2000
+  duration_s: 4.0
+  tones:
+    - frequency_hz: 80.0
+      amplitude: 0.7
+    - frequency_hz: 120.0
+      amplitude: 0.4
+    - frequency_hz: 160.0
+      amplitude: 0.2
+  white_noise_std: 0.03
+
+plant:
+  primary_taps: [0.80, 0.00, 0.15, 0.00, -0.08, 0.00, 0.04]
+  secondary_taps: [0.70, 0.00, 0.20, 0.00, -0.05]
+  second_delay_samples: 2
+
+controller:
+  type: fixed_fir
+  length: 32
+  regularization: 1e-6
+
+evaluation:
+  transient_s: 0.5
+
+output:
+  directory: results/step1_fixed
+  figure_directory: docs/figures
+  save_figures: true
+  show_figures: false
