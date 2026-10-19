@@ -53,10 +53,10 @@ class ANCPlant:
         if self.secondary_delay_samples < 0:
             raise ValueError("secondary_delay_samples must be non-negative.")
 
-        def primary_output(self, reference: FloatArray) -> FloatArray:
-            """Return the unwanted noise at the error microphone given a reference signal."""
-            return apply_fir(reference, self.primary_taps)
+    def primary_output(self, reference: FloatArray) -> FloatArray:
+        """Return the unwanted noise at the error microphone given a reference signal."""
+        return apply_fir(reference, self.primary_taps)
 
-        def secondary_output(self, control: FloatArray) -> FloatArray:
-            """Return the anti-noise at the error microphone given a control signal."""
-            return apply_fir(control, self.secondary_taps, self.secondary_delay_samples)
+    def secondary_output(self, control: FloatArray) -> FloatArray:
+        """Return the anti-noise at the error microphone given a control signal."""
+        return apply_fir(control, self.secondary_taps, self.secondary_delay_samples)

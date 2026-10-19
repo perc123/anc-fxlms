@@ -30,7 +30,7 @@ def generate_tone_mixture(
         raise ValueError("The signal must contain at least one sample.")
 
     rng = np.random.default_rng(seed)
-    n = np.arrange(n_samples, dtype=np.float64)
+    n = np.arange(n_samples, dtype=np.float64)
     t = n / sample_rate_hz
 
 
