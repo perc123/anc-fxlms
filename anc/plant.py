@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -9,31 +10,31 @@ def apply_fir(
         signal: FloatArray,
         taps: FloatArray,
         delay_samples: int = 0,
-) -> FloatArray:
-    """Applay an FIR filter and an explicit integer-sample delay."""
-    signal = np.asarray(signal, dtype=np.float64)
-    taps = np.asarray(taps, dtype=np.float64)
+    ) -> FloatArray:
+        """Applay an FIR filter and an explicit integer-sample delay."""
+        signal = np.asarray(signal, dtype=np.float64)
+        taps = np.asarray(taps, dtype=np.float64)
 
-    if signal.ndim != 1 or taps.ndim != 1:
-        raise ValueError("Signal and taps must be one-dimensional.")
+        if signal.ndim != 1 or taps.ndim != 1:
+            raise ValueError("Signal and taps must be one-dimensional.")
 
-    if taps.size == 0:
-        raise ValueError("The FIR filter must have at least one tap.")
+        if taps.size == 0:
+            raise ValueError("The FIR filter must have at least one tap.")
 
-    if delay_samples < 0:
-        raise ValueError("delay_samples must be non-negative.")
+        if delay_samples < 0:
+            raise ValueError("delay_samples must be non-negative.")
 
-    filtered = np.convolve(signal, taps, mode="full")[: signal.size]
+        filtered = cast(FloatArray, np.convolve(signal, taps, mode="full")[: signal.size])
 
-    if delay_samples == 0:
-        return filtered
+        if delay_samples == 0:
+            return filtered
 
-    delayed = np.zeros_like(filtered)
+        delayed = np.zeros_like(filtered)
 
-    if delay_samples < signal.size:
-        delayed[delay_samples:] = filtered[:-delay_samples]
+        if delay_samples < signal.size:
+            delayed[delay_samples:] = filtered[:-delay_samples]
 
-    return delayed
+        return delayed
 
 @dataclass(frozen=True)
 class ANCPlant:
