@@ -17,7 +17,7 @@ class FixedFIRController:
     def __post_init__(self) -> None:
         taps = np.asarray(self.taps, dtype=np.float64)
 
-        if taps.ndim != 1 or taps.size ==0:
+        if taps.ndim != 1 or taps.size == 0:
             raise ValueError("Controller taps must be a nonempty vector.")
 
         object.__setattr__(self, "taps", taps.copy())
@@ -53,22 +53,33 @@ def _fir_regression_matrix(
 
 
 def design_fixed_fir(
-        reference: FloatArray,
-        desired_noise: FloatArray,
-        plant: ANCPlant,
-        filter_length: int,
-        regularization: float = 1e-6,
-    ) -> FixedFIRController:
-    """Design a fixed controller by regularized least squares.
-    
-    The optimized residual is:
-        desired_noise + secondary_path(controller(reference))
-        
-    Coefficients are estimated offline and remain fixed during subsequent simulations."""
+    reference: FloatArray,
+    desired_noise: FloatArray,
+    plant: ANCPlant,
+    filter_length: int,
+    regularization: float = 1e-6,
+) -> FixedFIRController:
+    """Design a fixed FIR controller using regularized least squares.
 
+    Minimize:
+        ||desired_noise + S(W(reference))||^2
+        + regularization * ||taps||^2
+
+    where:
+        reference       is the reference signal x[n],
+        desired_noise   is the primary noise d[n],
+        W               is the FIR controller,
+        S               is the secondary path.
+
+    The controller coefficients are estimated offline and remain fixed
+    during subsequent simulations.
+    """
+
+    # Convert signals to float64 NumPy arrays.
     reference = np.asarray(reference, dtype=np.float64)
     desired_noise = np.asarray(desired_noise, dtype=np.float64)
 
+    # Validate inputs.
     if reference.ndim != 1 or desired_noise.ndim != 1:
         raise ValueError("Signals must be one-dimensional.")
 
@@ -78,42 +89,100 @@ def design_fixed_fir(
     if reference.size == 0:
         raise ValueError("Input signals cannot be empty.")
 
-    if regularization < 0:
-        raise ValueError("regularization must be non-negative.")
+    if not np.isfinite(reference).all():
+        raise ValueError("Reference contains NaN or infinite values.")
+
+    if not np.isfinite(desired_noise).all():
+        raise ValueError("Desired noise contains NaN or infinite values.")
 
     if filter_length < 1:
         raise ValueError("filter_length must be positive.")
 
-    # A unit impulse through the secondary path gives its impulse response, including the explicit delay.
+    if regularization < 0:
+        raise ValueError("regularization must be non-negative.")
 
-    impulse = np.zeros(filter_length, dtype=np.float64)
-    impulse[0] = 1.0
-
-    secondary_ir = plant.secondary_output(impulse)
-
-    # The cascade S(z)W(z) is linear in the controller taps. 
-    # Each column corresponds to the one controller tap after passing through the secondary path. 
-
+    # Construct the FIR regression matrix.
+    # Each column represents the reference signal delayed by one
+    # additional sample.
     reference_matrix = _fir_regression_matrix(
         reference,
         filter_length,
     )
-    effective_matrix = np.zeros_like(reference_matrix)
+
+    # Construct the effective matrix for the cascade S(z)W(z).
+    # Each column passes one controller basis signal through the
+    # secondary path.
+    effective_matrix = np.zeros_like(
+        reference_matrix,
+        dtype=np.float64,
+    )
 
     for k in range(filter_length):
         effective_matrix[:, k] = plant.secondary_output(
             reference_matrix[:, k]
         )
 
+    # Validate the constructed matrix before solving.
+    if not np.isfinite(effective_matrix).all():
+        raise ValueError(
+            "Effective matrix contains NaN or infinite values."
+        )
+
+    if effective_matrix.shape != (
+        reference.size,
+        filter_length,
+    ):
+        raise ValueError(
+            f"Unexpected effective matrix shape: "
+            f"{effective_matrix.shape}"
+        )
+
     # Solve:
-    # min_w ||d + A w||^2 + lambda * ||w||^2
+    # min_w ||A w + d||^2 + lambda * ||w||^2
+    #
+    # Use an augmented least-squares system rather than normal equations.
+    # This avoids explicitly forming A.T @ A, which can worsen
+    # numerical conditioning.
 
-    lhs = (
-        effective_matrix.T @ effective_matrix
-        + regularization * np.eye(filter_length)
-    )    
-    rhs = -(effective_matrix.T @ desired_noise)
+    if regularization > 0:
+        augmented_matrix = np.vstack(
+            (
+                effective_matrix,
+                np.sqrt(regularization)
+                * np.eye(filter_length, dtype=np.float64),
+            )
+        )
 
-    taps = cast(FloatArray, np.linalg.solve(lhs, rhs))
+        augmented_target = np.concatenate(
+            (
+                -desired_noise,
+                np.zeros(filter_length, dtype=np.float64),
+            )
+        )
+    else:
+        augmented_matrix = effective_matrix
+        augmented_target = -desired_noise
+
+    taps, *_ = np.linalg.lstsq(
+        augmented_matrix,
+        augmented_target,
+        rcond=None,
+    )
+
+    taps = np.asarray(taps, dtype=np.float64)
+
+    if not np.isfinite(taps).all():
+        raise ValueError(
+            "The optimized controller contains NaN or infinite values."
+        )
+
+    # Verify that the optimized controller produces a finite residual.
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        residual = desired_noise + effective_matrix @ taps
+
+    if not np.isfinite(residual).all():
+        raise ValueError(
+            "The optimized residual contains NaN or infinite values."
+        )
 
     return FixedFIRController(taps=taps)
