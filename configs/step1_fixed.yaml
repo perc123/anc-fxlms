@@ -17,7 +17,7 @@ signal:
 plant:
   primary_taps: [0.80, 0.00, 0.15, 0.00, -0.08, 0.00, 0.04]
   secondary_taps: [0.70, 0.00, 0.20, 0.00, -0.05]
-  second_delay_samples: 2
+  secondary_delay_samples: 2
 
 controller:
   type: fixed_fir

@@ -114,5 +114,6 @@ def main() -> None:
 
     print(results_text)
 
-    if __name__ == "__main__":
-        main()
+
+if __name__ == "__main__":
+    main()
