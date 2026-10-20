@@ -33,4 +33,14 @@ def run(
 
     control = controller.process(reference)
 
-    anti_noise = plant.
+    anti_noise = plant.secondary_output(control)
+
+    residual = primary_noise + anti_noise
+
+    return SimulationTrace(
+        reference=reference.copy(),
+        primary_noise=primary_noise,
+        control=control,
+        anti_noise=anti_noise,
+        residual=residual,
+    )
