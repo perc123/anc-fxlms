@@ -1,0 +1,5 @@
+controller:
+  type: lms
+  length: 32
+  step_size: 0.001
+  initial_weights: zeros
