@@ -186,3 +186,89 @@ def design_fixed_fir(
         )
 
     return FixedFIRController(taps=taps)
+
+@dataclass
+class LMSController:
+    """Adaptive FIR controller using the ordinary LMS algorithm"""
+
+    filter_length: int
+    step_size: float
+    weights: FloatArray | None = None
+
+    def __post_init__(self) -> None:
+        if self.filter_length < 1:
+            raise ValueError("filter_length must be positive")
+
+        if not np.isfinite(self.step_size) or self.step_size <= 0:
+            raise ValueError("step_size must be finite and positive")
+
+        if self.weights is None:
+            self.weights = np.zeros(
+                self.filter_length,
+                dtype=np.float64,
+            )
+
+        else:
+            self.weights = np.asarray(
+                self.weights,
+                dtype=np.float64,
+            ).copy()
+
+        if self.weights.shape != (self.filter_length,):
+            raise ValueError("weights must have shape (filter_length,).")
+
+        if not np.isfinite(self.weights).all():
+            raise ValueError("weights must be finite.")
+
+        def reset(self) -> None:
+            """Reset the controller coefficients to zero"""
+            self.weights = np.zeros(
+                self.filter_length,
+                dtype=np.float64,
+            )
+        def predict(self, reference_vector = FloatArray) -> float:
+            """Compute the FIR output without updating the coefficients."""
+            assert self.weights is not None
+            reference_vector = np.asarray(
+                reference_vector,
+                dtype=np.float64,
+            )
+
+            if reference_vector.shape != (self.filter_length,):
+                raise ValueError("reference_vector must have shape (filter_lenght,).")
+
+            return float(self.weights @ reference_vector)
+
+        def update(
+            self,
+            reference_vector: FloatArray,
+            error: float,
+        ) -> None:
+            """Apply one ordinary LMS coefficient update.
+            
+            Update convention:
+                weights <- weights - step_size * error * reference_vector
+            """
+            assert self.weights is not None
+            reference_vector = np.asarray(
+                reference_vector,
+                dtype=np.float64,
+            )
+
+            if reference_vector.shape != (self.filter_length,):
+                raise ValueError("reference_vector must have shape (filter_length,).")
+
+            if not np.isfinite(reference_vector).all():
+                raise ValueError("reference_vectro must be finite.")
+
+            if not np.isfinite(error):
+                raise ValueError("error must be finite.")
+
+            self.weights -= (
+                self.step_size * error * reference_vector
+            )
+
+            if not np.isfinite(self.weights).all():
+                raise ValueError("LMS coefficients became non-finite.")
+
+            
