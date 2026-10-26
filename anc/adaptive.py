@@ -30,7 +30,7 @@ def run_lms(
     desired = np.asarray(desired, dtype=np.float64)
 
     if reference.ndim != 1 or desired.ndim != 1:
-        raise ValueError("Signals must be one-dimentional.")
+        raise ValueError("Signals must be one-dimensional.")
 
     if reference.size == 0:
         raise ValueError("Signals cannot be empty.")
@@ -39,7 +39,7 @@ def run_lms(
         raise ValueError("Signals must have the same length.")
 
     if not np.isfinite(desired).all():
-        raise ValueError("Disired signal must be finite.")
+        raise ValueError("Desired signal must be finite.")
 
     controller.reset()
 
@@ -58,7 +58,7 @@ def run_lms(
 
     for n in range(n_samples):
         reference_history[1:] = reference_history[:-1]
-        reference_history[0] = reference_history[n]
+        reference_history[0] = reference[n]
 
         control[n] = controller.predict(reference_history)
 

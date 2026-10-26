@@ -1,5 +1,29 @@
+experiment:
+  name: step2_lms
+  seed: 42
+
+signal:
+  sample_rate_hz: 2000
+  duration_s: 4.0
+  tones:
+    - frequency_hz: 80.0
+      amplitude: 0.7
+    - frequency_hz: 120.0
+      amplitude: 0.4
+    - frequency_hz: 160.0
+      amplitude: 0.2
+  white_noise_std: 0.03
+
 controller:
   type: lms
   length: 32
   step_size: 0.001
-  initial_weights: zeros
+
+evaluation:
+  transient_s: 0.5
+
+output:
+  directory: results/step2_lms
+  figure_directory: docs/figures
+  save_figures: true
+  show_figures: false

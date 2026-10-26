@@ -259,7 +259,7 @@ class LMSController:
                 raise ValueError("reference_vector must have shape (filter_length,).")
 
             if not np.isfinite(reference_vector).all():
-                raise ValueError("reference_vectro must be finite.")
+                raise ValueError("reference_vector must be finite.")
 
             if not np.isfinite(error):
                 raise ValueError("error must be finite.")
