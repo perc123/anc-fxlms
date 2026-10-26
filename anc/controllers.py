@@ -220,55 +220,55 @@ class LMSController:
         if not np.isfinite(self.weights).all():
             raise ValueError("weights must be finite.")
 
-        def reset(self) -> None:
-            """Reset the controller coefficients to zero"""
-            self.weights = np.zeros(
-                self.filter_length,
-                dtype=np.float64,
-            )
-        def predict(self, reference_vector = FloatArray) -> float:
-            """Compute the FIR output without updating the coefficients."""
-            assert self.weights is not None
-            reference_vector = np.asarray(
-                reference_vector,
-                dtype=np.float64,
-            )
+    def reset(self) -> None:
+        """Reset the controller coefficients to zero"""
+        self.weights = np.zeros(
+            self.filter_length,
+            dtype=np.float64,
+        )
+    def predict(self, reference_vector: FloatArray) -> float:
+        """Compute the FIR output without updating the coefficients."""
+        assert self.weights is not None
+        reference_vector = np.asarray(
+            reference_vector,
+            dtype=np.float64,
+        )
 
-            if reference_vector.shape != (self.filter_length,):
-                raise ValueError("reference_vector must have shape (filter_lenght,).")
+        if reference_vector.shape != (self.filter_length,):
+            raise ValueError("reference_vector must have shape (filter_length,).")
 
-            return float(self.weights @ reference_vector)
+        return float(self.weights @ reference_vector)
 
-        def update(
-            self,
-            reference_vector: FloatArray,
-            error: float,
-        ) -> None:
-            """Apply one ordinary LMS coefficient update.
-            
-            Update convention:
-                weights <- weights - step_size * error * reference_vector
-            """
-            assert self.weights is not None
-            reference_vector = np.asarray(
-                reference_vector,
-                dtype=np.float64,
-            )
+    def update(
+        self,
+        reference_vector: FloatArray,
+        error: float,
+    ) -> None:
+        """Apply one ordinary LMS coefficient update.
+        
+        Update convention:
+            weights <- weights - step_size * error * reference_vector
+        """
+        assert self.weights is not None
+        reference_vector = np.asarray(
+            reference_vector,
+            dtype=np.float64,
+        )
 
-            if reference_vector.shape != (self.filter_length,):
-                raise ValueError("reference_vector must have shape (filter_length,).")
+        if reference_vector.shape != (self.filter_length,):
+            raise ValueError("reference_vector must have shape (filter_length,).")
 
-            if not np.isfinite(reference_vector).all():
-                raise ValueError("reference_vector must be finite.")
+        if not np.isfinite(reference_vector).all():
+            raise ValueError("reference_vector must be finite.")
 
-            if not np.isfinite(error):
-                raise ValueError("error must be finite.")
+        if not np.isfinite(error):
+            raise ValueError("error must be finite.")
 
-            self.weights -= (
-                self.step_size * error * reference_vector
-            )
+        self.weights -= (
+            self.step_size * error * reference_vector
+        )
 
-            if not np.isfinite(self.weights).all():
-                raise ValueError("LMS coefficients became non-finite.")
+        if not np.isfinite(self.weights).all():
+            raise ValueError("LMS coefficients became non-finite.")
 
-            
+        
