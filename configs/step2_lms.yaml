@@ -14,6 +14,9 @@ signal:
       amplitude: 0.2
   white_noise_std: 0.03
 
+plant:
+  primary_taps: [0.80, 0.00, 0.15, 0.00, -0.08, 0.00, 0.04]
+
 controller:
   type: lms
   length: 32
