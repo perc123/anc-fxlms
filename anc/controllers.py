@@ -271,4 +271,132 @@ class LMSController:
         if not np.isfinite(self.weights).all():
             raise ValueError("LMS coefficients became non-finite.")
 
-        
+
+@dataclass
+class FxLMSController:
+    """FIR controller adapted using the filtered-x LMS algorith."""
+
+    filter_length: int
+    step_size: float
+    estimated_secondary_taps: FloatArray
+    estimated_secondary_delay_samples: int = 0
+    weights: FloatArray | None = None
+
+    def __post_init__(self) -> None:
+        if self.filter_length < 1:
+            raise ValueError("filter_length must be positive.")
+
+        if not np.isfinite(self.step_size) or self.step_size <= 0:
+            raise ValueError("step_size must be finite and positive.")
+
+        if self.estimated_secondary_delay_samples < 0:
+            raise ValueError("Estimated secondary-path delay must be non-negative.")
+
+        self.estimated_secondary_taps = np.asarray(
+            self.estimated_secondary_taps,
+            dtype=np.float64,
+        ).copy()
+
+        if self.estimated_secondary_taps.ndim != 1:
+            raise ValueError(
+                "estimated_secondary_taps must be one-dimentional."
+            )
+
+        if self.estimated_secondary_taps.size == 0:
+            raise ValueError("estimated_secondary_taps cannot be empty.")
+
+        if not np.isfinite(self.estimated_secondary_taps).all():
+            raise ValueError(
+                "Estimated secondary-path taps must be finite."
+            )
+
+        if self.weights in None:
+            self.weights = np.zeros(
+                self.filter_length,
+                dtype=np.float64,
+            )
+        else:
+            self.weights = np.asarray(
+                self.weights,
+                dtype=np.float64,
+            ).copy()
+
+            if self.weights.shape != (self.filter_length,):
+                raise ValueError(
+                    "weights must habe shape (filter_length,)."
+                )
+
+            if not np.isfinite(self.weights).all():
+                raise ValueError("weights must be finite.")
+
+    def reset(self) -> None:
+        """Reset the adaptive controller to zero coefficients."""
+        self.weights = np.zeros(
+            self.filter_length,
+            dtype=np.float64,
+        )
+
+    def predict(self, reference_vector: FloatArray) -> float:
+        """Calculate the controller output for a reference vector."""
+        assert self.weights is not None
+
+        reference_vector = np.asarray(
+            reference_vector,
+            dtype=float64,
+        )
+
+        if reference_vector.shape != (self.filter_length,):
+            raise ValueError(
+                "reference_vector must have shape (filter_length,)."
+            )
+
+        if not np.isfinite(reference_vector).all():
+            raise ValueError("Reference vector must be finite.")
+
+        return float(self.weights @ reference_vector)
+
+    def update(
+            self,
+            filtered_reference_vector: FloatArray,
+            error: float,
+    ) -> None:
+        """Perform one FxLMS coefficient update.
+
+        The residual convention is:
+            error =. primary_noise + anti_noise
+
+        Therefore:
+            weights <- weights
+                        - step_size * error * filtered_reference_vector
+        """
+        assert self.weights is not None
+
+        filtered_reference_vector = np.asarray(
+            filtered_reference_vector,
+            np.float64,
+        )
+
+        if filtered_reference_vector.shape != (self.filter_length,):
+            raise ValueError(
+                "filtered_reference_vector must have shape"
+                "(filter_length,)."
+            )
+
+        if not np.isfinite(filtered_reference_vector).all():
+            raise ValueError(
+                "Filtered reference vector must be finite."
+            )
+
+        if not np.isfinite(error):
+            raise ValueError("Error must be finite.")
+
+        self.weights -= (
+            self.step_size
+            * error
+            * filtered_reference_vector
+        )
+
+        if not np.isfinite(self.weights).all():
+            raise FloatingPointError(
+                "FxLMS coefficients became non-finite."
+            )
