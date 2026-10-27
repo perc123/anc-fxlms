@@ -30,7 +30,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--config",
-        default="configs=step2_lms.yaml",
+        default="configs/step2_lms.yaml",
         help="Path to the experiment YAML configuration."
     )
     args = parser.parse_args()
@@ -56,19 +56,11 @@ def main() -> None:
     duration_s = float(signal_cfg["duration_s"])
     seed = int(experiment_cfg["seed"])
 
-    tones = [
-        (
-            float(tone["frequency_hz"]),
-            float(tone["amplitude"]),
-        )
-        for tone in signal_cfg["tones"]
-    ]
-
     # Generate the reference signal.
     reference = generate_tone_mixture(
         sample_rate_hz=sample_rate_hz,
         duration_s=duration_s,
-        tones=tones,
+        tones=signal_cfg["tones"],
         white_noise_std=float(
             signal_cfg.get("white_noise_std", 0.0)
         ),
