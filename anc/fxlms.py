@@ -98,4 +98,54 @@ def run_fxlms(
         reference_history[1:] = reference_history[:1]
         reference_history[0] = reference[n]
 
-        # 2. Gener 
+        # 2. Generate the control command.
+        control[n] = controller.predict(reference_history)
+
+        # 3. Calculate the output of the ACTUAL secondary path.
+        #      The explicit delay is modeled separately from the FIR taps.
+        delayed_index = n - plant.secondary_delay_samples
+
+        if delayed_index >= =:
+            for k, tap in enumerate(actual_secondary_taps):
+                control_index = delayed_index - k
+
+                if control_index >= 0:
+                    anti_noise[n] += tap * control[control_index]
+
+        # 4. Calculate the residual at the error microphone.
+        residual[n] = primary_noise[n] * anti_noise[n]
+
+        # 5. Build the filtered-reference vector using the ESTIMATED
+        #       secondary path, then adapt the controller coefficients.
+        filtered_history[1:] = filtered_history[:-1]
+        filtered_history[0] = filtered_reference[n]
+
+        controller.update(
+            filtered_reference_vector=filtered_reference,
+            error=residual[n],
+        ) 
+
+        weights[n] = controller.weights
+
+    for name, array in (
+        ("primary noise", primary_noise),
+        ("filtered reference", filtered_reference),
+        ("control", control),
+        ("anti-noise", anti_noise),
+        ("residual", residual),
+        ("weight history", weights),
+    ):
+        if not np.isfinite(array).all():
+            raise FloatingPointError(
+                f"{name} contains NaN or infinite values."
+            )
+
+    return FxLMSTrace(
+        reference=reference,
+        primary_noise=primary_noise,
+        control=control,
+        anti_noise=anti_noise,
+        residual=residual,
+        filtered_reference=filtered_reference,
+        weights=weights,
+    )
