@@ -6,6 +6,115 @@ import numpy as np
 from anc.controllers import FixedFIRController
 from anc.simulate import SimulationTrace
 from anc.adaptive import LMSTrace
+from anc.fxlms import FxLMSTrace
+
+
+def plot_fxlms_results(
+        trace: FxLMSTrace,
+        sample_rate_hz: int,
+        output_dir: Path | None = None,
+        show: bool = False,
+) -> list[Path]:
+    """Plot FxMLS signals, learning curve and coefficient evolution."""
+
+    if sample_rate_hz <= 0:
+        raise ValueError("sample_rate_hz must be positive.")
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    n_samples = trace.reference.size
+    time_s = np.arange(n_samples) /sample_rate_hz
+    saved_paths: list[Path] = []
+
+    def finish(fig: plt.Figure, filename: str) -> None:
+        fig.tight_layout()
+
+        if output_dir is not None:
+            path = output_dir / filename
+            fig.savefig(path, dpi=150, bbox_inches="tight")
+            saved_paths.append(path)
+
+        if show:
+            plt.show()
+
+        plt.close(fig)
+
+    # 1. Primary noise, anti- noise and residual.
+    shown = min(n_samples, sample_rate_hz)
+
+    fig, axes = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
+
+    axes[0].plot(
+        time_s[:shown],
+        trace.primary_noise[:shown],
+        label="Primary noise",
+    )
+    axes[0].plot(
+        time_s[:shown],
+        trace.anti_noise[:shown],
+        label="Anti-noise",
+        alpha=0.8,
+    )
+    axes[0].set_title("Primary noise and secondary-path anti-noise")
+    axes[0].set_ylabel("Amplitude")
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(time_s[:shown], trace.residual[:shown])
+    axes[1].set_title("Residual at the error microphone")
+    axes[1].set_xlabel("Time (s)")
+    axes[1].set_ylabel("Amplitude")
+    axes[1].grid(True, alpha=0.3)
+
+    finish(fig, "step3_fxlms_mismatch_timeseries.png")
+
+    # 2. Non-overlapping 100 ms RMS learning curve.
+    block_size = max(1, int(round(0.1 * sample_rate_hz)))
+    block_times: list[float] = []
+    primary_rms: list[float] = []
+    residual_rms: list[float] = []
+
+    for start in range(0, n_samples, block_size):
+        stop = min(start + block_size, n_samples)
+
+        block_times.append((start + stop) / (2 * sample_rate_hz))
+        primary_block = trace.primary_noise[start:stop]
+        residual_block = trace.residual[start:stop]
+
+        primary_rms.append(
+            float(np.sqrt(np.mean(primary_block**2)))
+        )
+        residual_rms.append(
+            float(np.sqrt(np.mean(residual_block**2)))
+        )
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(block_times, primary_rms, label="Primary-noise RMS")
+    ax.plot(block_times, residual_rms, label="Residual RMS")
+    ax.set_title("FxLMS convergence (100 ms block RMS)")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("RMS amplitude")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    finish(fig, "step3_fxlms_mismatch_learning_curve.png")
+
+    # 3. Track the first eight coefficients.
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    for k in range(min(8, trace.weights.shape[1])):
+        ax.plot(time_s, trace.weights[:, k], label=f"Tap {k}")
+
+    ax.set_title("FxLMS coefficient evolution")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Coefficient value")
+    ax.legend(ncol=2)
+    ax.grid(True, alpha=0.3)
+
+    finish(fig, "step3_fxlms_mismatch_weights.png")
+
+    return saved_paths
 
 def plot_results(
         trace: SimulationTrace,
