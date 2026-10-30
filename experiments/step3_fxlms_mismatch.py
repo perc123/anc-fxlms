@@ -57,10 +57,10 @@ def main() -> None:
     seed = int(experiment_cfg["seed"])
 
     tones = [
-        (
-            float(tone["frequency_hz"]),
-            float(tone["amplitude"]),
-        )
+        {
+            "frequency_hz": float(tone["frequency_hz"]),
+            "amplitude": float(tone["amplitude"]),
+        }
         for tone in signal_cfg["tones"]
     ]
 

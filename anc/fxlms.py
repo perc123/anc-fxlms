@@ -78,10 +78,6 @@ def run_fxlms(
     anti_noise = np.zeros(n_samples, dtype=np.float64)
     residual = np.zeros(n_samples, dtype=np.float64)
 
-    weights = np.zeros(n_samples, dtype=np.float64)
-    anti_noise = np.zeros(n_samples, dtype=np.float64)
-    residual = np.zeros(n_samples, dtype=np.float64)
-
     weights = np.zeros(
         (n_samples, filter_length),
         dtype=np.float64,
@@ -95,7 +91,7 @@ def run_fxlms(
     for n in range(n_samples):
         # 1. Build the controller input vector:
         #       [x[n], x[n-1], ..., x[n-L+1]].
-        reference_history[1:] = reference_history[:1]
+        reference_history[1:] = reference_history[:-1]
         reference_history[0] = reference[n]
 
         # 2. Generate the control command.
@@ -105,7 +101,7 @@ def run_fxlms(
         #      The explicit delay is modeled separately from the FIR taps.
         delayed_index = n - plant.secondary_delay_samples
 
-        if delayed_index >= =:
+        if delayed_index >= 0:
             for k, tap in enumerate(actual_secondary_taps):
                 control_index = delayed_index - k
 
@@ -113,7 +109,7 @@ def run_fxlms(
                     anti_noise[n] += tap * control[control_index]
 
         # 4. Calculate the residual at the error microphone.
-        residual[n] = primary_noise[n] * anti_noise[n]
+        residual[n] = primary_noise[n] + anti_noise[n]
 
         # 5. Build the filtered-reference vector using the ESTIMATED
         #       secondary path, then adapt the controller coefficients.
@@ -121,9 +117,9 @@ def run_fxlms(
         filtered_history[0] = filtered_reference[n]
 
         controller.update(
-            filtered_reference_vector=filtered_reference,
+            filtered_reference_vector=filtered_history,
             error=residual[n],
-        ) 
+        )
 
         weights[n] = controller.weights
 

@@ -310,7 +310,7 @@ class FxLMSController:
                 "Estimated secondary-path taps must be finite."
             )
 
-        if self.weights in None:
+        if self.weights is None:
             self.weights = np.zeros(
                 self.filter_length,
                 dtype=np.float64,
@@ -323,7 +323,7 @@ class FxLMSController:
 
             if self.weights.shape != (self.filter_length,):
                 raise ValueError(
-                    "weights must habe shape (filter_length,)."
+                    "weights must have shape (filter_length,)."
                 )
 
             if not np.isfinite(self.weights).all():
@@ -342,7 +342,7 @@ class FxLMSController:
 
         reference_vector = np.asarray(
             reference_vector,
-            dtype=float64,
+            dtype=np.float64,
         )
 
         if reference_vector.shape != (self.filter_length,):

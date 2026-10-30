@@ -45,7 +45,7 @@ def test_fxlms_run_returns_expected_shapes():
     assert trace.anti_noise.shape == reference.shape
     assert trace.residual.shape == reference.shape
     assert trace.filtered_reference.shape == reference.shape
-    assert trace.weights.shape == [reference.size, 8]
+    assert trace.weights.shape == (reference.size, 8)
 
     for array in (
         trace.primary_noise,
