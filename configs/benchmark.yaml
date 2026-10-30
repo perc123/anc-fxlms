@@ -1,0 +1,41 @@
+experiment:
+  name: anc_method_benchmark
+
+signal:
+  sample_rate_hz: 2000
+  training_duration_s: 4.0
+  test_duration_s: 4.0
+  tones:
+    - frequency_hz: 80.0
+      amplitude: 0.7
+    - frequency_hz: 120.0
+      amplitude: 0.4
+    - frequency_hz: 160.0
+      amplitude: 0.2
+  white_noise_std: 0.03
+
+benchmark:
+  seeds: [42, 43, 44, 45, 46]
+  transient_s: 0.5
+
+plant:
+  primary_taps: [0.80, 0.00, 0.15, 0.00, -0.08, 0.00, 0.04]
+  secondary_taps: [0.70, 0.00, 0.20, 0.00, -0.05]
+  secondary_delay_samples: 2
+
+fixed_controller:
+  length: 32
+  regularization: 0.000001
+
+fxlms:
+  length: 32
+  step_size: 0.005
+
+mismatch:
+  estimated_secondary_taps: [0.66, 0.00, 0.23, 0.00, -0.03]
+  estimated_secondary_delay_samples: 2
+
+output:
+  directory: results/benchmark
+  figure_directory: docs/figures
+  save_figures: true
