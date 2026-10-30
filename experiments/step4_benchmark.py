@@ -33,10 +33,10 @@ def generate_reference(
     signal_cfg = config["signal"]
 
     tones = [
-        (
-            float(item["frequency_hz"]),
-            float(item["amplitude"]),
-        )
+        {
+            "frequency_hz": float(item["frequency_hz"]),
+            "amplitude": float(item["amplitude"]),
+        }
         for item in signal_cfg["tones"]
     ]
 
