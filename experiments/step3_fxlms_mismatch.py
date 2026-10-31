@@ -100,10 +100,14 @@ def main() -> None:
         ),
     )
 
+    safety_cfg = config.get("safety", {})
+
     trace = run_fxlms(
         reference=reference,
         plant=plant,
         controller=controller,
+        max_weight_norm=safety_cfg.get("max_weight_norm", 1e6),
+        max_abs_residual=safety_cfg.get("max_abs_residual", 1e6),
     )
 
     transient_s = float(
@@ -113,18 +117,28 @@ def main() -> None:
 
     if not 0 <= start_sample < reference.size:
         raise ValueError(
-            "evaluation.transient_s must be non-negative and" 
+            "evaluation.transient_s must be non-negative and "
             "shorter than the signal duration."
         )
 
-    primary_rms = rms(trace.primary_noise[start_sample:])
-    residual_rms = rms(trace.residual[start_sample:])
+    valid_samples = trace.processed_samples
 
-    anc_attenuation_db = attenuation_db(
-        trace.primary_noise,
-        trace.residual,
-        start_sample=start_sample,
-    )
+    if valid_samples <= start_sample:
+        primary_rms = float("nan")
+        residual_rms = float("nan")
+        anc_attenuation_db = float("nan")
+    else:
+        primary_valid = trace.primary_noise[:valid_samples]
+        residual_valid = trace.residual[:valid_samples]
+
+        primary_rms = rms(primary_valid[start_sample:])
+        residual_rms = rms(residual_valid[start_sample:])
+
+        anc_attenuation_db = attenuation_db(
+            primary_valid,
+            residual_valid,
+            start_sample=start_sample,
+        )
 
     results_dir = resolve_path(output_cfg["directory"])
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -139,6 +153,15 @@ def main() -> None:
         residual=trace.residual,
         filtered_reference=trace.filtered_reference,
         weights=trace.weights,
+        status=np.asarray(trace.status),
+        processed_samples=np.asarray(trace.processed_samples),
+        divergence_sample=np.asarray(
+            -1 if trace.divergence_sample is None
+            else trace.divergence_sample
+        ),
+        divergence_reason=np.asarray(
+            trace.divergence_reason or ""
+        ),
     )
 
     metrics_path = results_dir / "metrics.txt"
@@ -160,6 +183,10 @@ def main() -> None:
         f"Primary-noise RMS: {primary_rms:.8f}\n"
         f"Residual RMS: {residual_rms:.8f}\n"
         f"ANC attenuation: {anc_attenuation_db:.4f} dB\n"
+        f"Run status: {trace.status}\n"
+        f"Processed samples: {trace.processed_samples} / {reference.size}\n"
+        f"Divergence sample: {trace.divergence_sample}\n"
+        f"Divergence reason: {trace.divergence_reason or 'None'}\n"
     )
     metrics_path.write_text(metrics_text, encoding="utf-8")
 
@@ -193,6 +220,15 @@ def main() -> None:
 
     for path in figure_paths:
         print(f"Figure saved to: {path}")
+    print(f"Run status: {trace.status}")
+    print(
+        f"Processed samples: "
+        f"{trace.processed_samples} / {reference.size}"
+    )
+    print(f"Divergence sample: {trace.divergence_sample}")
+
+    if trace.divergence_reason:
+        print(f"Divergence reason: {trace.divergence_reason}")
 
 
 if __name__ == "__main__":

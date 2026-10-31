@@ -34,3 +34,7 @@ output:
   figure_directory: docs/figures
   save_figures: true
   show_figures: false
+
+safety:
+  max_weight_norm: 100.0
+  max_abs_residual: 10.0
