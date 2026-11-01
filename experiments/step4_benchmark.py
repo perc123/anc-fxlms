@@ -83,7 +83,7 @@ def evaluate_attenuation(
 
 def main() -> None:
     parser =  argparse.ArgumentParser(
-        description="Benchmark fixed FIR and FxLMS ANC mathods."
+        description="Benchmark fixed FIR and FxLMS ANC methods."
     )
     parser.add_argument(
         "--config",

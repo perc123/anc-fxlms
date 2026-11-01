@@ -1,12 +1,10 @@
 from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import NDArray
 
 from anc.controllers import FixedFIRController
 from anc.plant import ANCPlant
-
-FloatArray = NDArray[np.float64]
+from anc.types import FloatArray
 
 
 @dataclass(frozen=True)
@@ -27,7 +25,7 @@ def run(
     reference = np.asarray(signal, dtype=np.float64)
 
     if reference.ndim != 1 or reference.size == 0:
-        raise ValueError("Signal must be a noempty 1-D array.")
+        raise ValueError("Signal must be a non-empty 1-D array.")
 
     primary_noise = plant.primary_output(reference)
 

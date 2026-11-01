@@ -1,10 +1,8 @@
 from collections.abc import Sequence
 
 import numpy as np
-from numpy.typing import NDArray
 
-
-FloatArray = NDArray[np.float64] 
+from anc.types import FloatArray
 
 
 def generate_tone_mixture(
@@ -14,7 +12,7 @@ def generate_tone_mixture(
         white_noise_std: float = 0.0,
         seed: int = 42,
 ) -> FloatArray:
-    """Generate a reproducable mixture of sinusoids and white noise."""
+    """Generate a reproducible mixture of sinusoids and white noise."""
     if sample_rate_hz <= 0:
         raise ValueError("Sample rate must be positive.")
 

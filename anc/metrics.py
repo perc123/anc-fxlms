@@ -1,7 +1,6 @@
 import numpy as np
-from numpy.typing import NDArray
 
-FloatArray = NDArray[np.float64]
+from anc.types import FloatArray
 
 def rms(signal: FloatArray) -> float:
     """Calculate root-mean-square amplitude."""

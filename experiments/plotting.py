@@ -15,7 +15,7 @@ def plot_fxlms_results(
         output_dir: Path | None = None,
         show: bool = False,
 ) -> list[Path]:
-    """Plot FxMLS signals, learning curve and coefficient evolution."""
+    """Plot FxLMS signals, learning curve and coefficient evolution."""
 
     if sample_rate_hz <= 0:
         raise ValueError("sample_rate_hz must be positive.")
@@ -190,6 +190,33 @@ def plot_results(
 
     plt.close()
 
+    # Power spectral density before and after control, transient excluded.
+    nfft = min(512, n - start_sample)
+    fig, ax = plt.subplots(figsize=(8, 4))
+
+    ax.psd(
+        trace.primary_noise[start_sample:],
+        NFFT=nfft,
+        Fs=sample_rate_hz,
+        label="Primary noise",
+    )
+    ax.psd(
+        trace.residual[start_sample:],
+        NFFT=nfft,
+        Fs=sample_rate_hz,
+        label="Residual",
+    )
+    ax.set_title("Power Spectral Density Before and After Control")
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(output_dir / "step1_psd.png", dpi=160)
+
+    if show:
+        plt.show()
+
+    plt.close(fig)
+
 def plot_lms_results(
         trace: LMSTrace,
         sample_rate_hz: int,
@@ -243,10 +270,10 @@ def plot_lms_results(
     axes[1].plot(
         time_s[:shown_samples],
         trace.control[:shown_samples],
-        label="LMS output",
+        label="LMS output (anti-signal)",
         alpha=0.8,
     )
-    axes[1].set_title("Desired signal and adaptive-filter output")
+    axes[1].set_title("Desired signal and adaptive-filter output (error = desired + output)")
     axes[1].set_ylabel("Amplitude")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
@@ -255,7 +282,7 @@ def plot_lms_results(
         time_s[:shown_samples],
         trace.error[:shown_samples],
     )
-    axes[2].set_title("Prediction error")
+    axes[2].set_title("Residual error")
     axes[2].set_xlabel("Time (s)")
     axes[2].set_ylabel("Amplitude")
     axes[2].grid(True, alpha=0.3)

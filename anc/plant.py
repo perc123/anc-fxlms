@@ -2,16 +2,15 @@ from dataclasses import dataclass
 from typing import cast
 
 import numpy as np
-from numpy.typing import NDArray
 
-FloatArray =  NDArray[np.float64]
+from anc.types import FloatArray
 
 def apply_fir(
         signal: FloatArray,
         taps: FloatArray,
         delay_samples: int = 0,
     ) -> FloatArray:
-        """Applay an FIR filter and an explicit integer-sample delay."""
+        """Apply an FIR filter and an explicit integer-sample delay."""
         signal = np.asarray(signal, dtype=np.float64)
         taps = np.asarray(taps, dtype=np.float64)
 

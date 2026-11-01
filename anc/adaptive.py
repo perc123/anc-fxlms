@@ -1,11 +1,10 @@
 from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import NDArray
 
 from anc.controllers import LMSController
+from anc.types import FloatArray
 
-FloatArray = NDArray[np.float64]
 
 @dataclass
 class LMSTrace:
@@ -25,6 +24,12 @@ def run_lms(
     This experiment intentionally does not model ANC secondary path.
     It is a reference experiment for learning and validating LMS before
     implementing the filtered-x LMS algorithm.
+
+    It uses the same convention as FxLMS: the error is the sum of the
+    unwanted signal and the controller output,
+        e[n] = desired[n] + control[n],
+    and the update is w <- w - mu * e[n] * x[n]. The filter therefore
+    converges to the negative of the path that generates `desired`.
     """
     reference =  np.asarray(reference, dtype=np.float64)
     desired = np.asarray(desired, dtype=np.float64)
@@ -62,10 +67,10 @@ def run_lms(
 
         control[n] = controller.predict(reference_history)
 
-        # Direct-error model: e[n] = desired[n] - control[n].
-        error[n] = desired[n] - control[n]
+        # Direct-error model: e[n] = desired[n] + control[n].
+        error[n] = desired[n] + control[n]
 
-        controller.update(reference_history, -error[n])
+        controller.update(reference_history, error[n])
         weight_history[n] = controller.weights
 
     return LMSTrace(

@@ -2,12 +2,12 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
-from numpy.typing import NDArray
 
 from anc.controllers import FxLMSController
 from anc.plant import ANCPlant, apply_fir
+from anc.types import FloatArray
 
-FloatArray = NDArray[np.float64]
+
 RunStatus = Literal["completed", "diverged"]
 
 
@@ -43,6 +43,10 @@ def run_fxlms(
     """Run sample-by-sample FxLMS active noise cancellation.
         The residual convention is:
             e[n] = primary_noise[n] + anti_noise[n]
+
+        This batch harness computes y[n], then e[n], then adapts within the
+        same step. It is not the audio-callback order: see anc.streaming
+        for the update-then-predict order that the C++ port mirrors.
 
         The adaptation rule is:
             w[n+1] = w[n] - mu * e[n] * filtered_reference_vector[n]
@@ -125,12 +129,11 @@ def run_fxlms(
     n_samples = reference.size
     filter_length = controller.filter_length
 
-    # Unprocessed samples stay zero in these arrays.
-    control = np.zeros(n_samples, dtype=np.float64)
-    anti_noise = np.zeros(n_samples, dtype=np.float64)
-    residual = np.zeros(n_samples, dtype=np.float64)
+    # NaN indicates that a sample was not processed.
+    control = np.full(n_samples, np.nan, dtype=np.float64)
+    anti_noise = np.full(n_samples, np.nan, dtype=np.float64)
+    residual = np.full(n_samples, np.nan, dtype=np.float64)
 
-    # NaN rows in weights indicate samples that were not processed.
     weights = np.full(
         (n_samples, filter_length),
         np.nan,

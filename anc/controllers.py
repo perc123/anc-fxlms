@@ -2,15 +2,14 @@ from dataclasses import dataclass
 from typing import cast
 
 import numpy as np
-from numpy.typing import NDArray
 
 from anc.plant import ANCPlant, apply_fir
+from anc.types import FloatArray
 
-FloatArray = NDArray[np.float64]
 
 @dataclass(frozen=True)
 class FixedFIRController:
-    """Fixed FIR controller with offline least-sqares design."""
+    """Fixed FIR controller with offline least-squares design."""
 
     taps: FloatArray
 
@@ -31,7 +30,7 @@ def _fir_regression_matrix(
         signal: FloatArray,
         filter_length: int,
 ) -> FloatArray:
-    """Construct the casual FIR regression matrix for a given signal."""
+    """Construct the causal FIR regression matrix for a given signal."""
     if filter_length < 1:
         raise ValueError("filter_length must be positive.")
 
@@ -274,7 +273,7 @@ class LMSController:
 
 @dataclass
 class FxLMSController:
-    """FIR controller adapted using the filtered-x LMS algorith."""
+    """FIR controller adapted using the filtered-x LMS algorithm."""
 
     filter_length: int
     step_size: float
@@ -299,7 +298,7 @@ class FxLMSController:
 
         if self.estimated_secondary_taps.ndim != 1:
             raise ValueError(
-                "estimated_secondary_taps must be one-dimentional."
+                "estimated_secondary_taps must be one-dimensional."
             )
 
         if self.estimated_secondary_taps.size == 0:
@@ -363,7 +362,7 @@ class FxLMSController:
         """Perform one FxLMS coefficient update.
 
         The residual convention is:
-            error =. primary_noise + anti_noise
+            error = primary_noise + anti_noise
 
         Therefore:
             weights <- weights

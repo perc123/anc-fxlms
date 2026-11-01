@@ -19,8 +19,12 @@ anc/                  Core DSP library
   plant.py            ANCPlant: primary and secondary path FIR models
   controllers.py      FixedFIRController + offline least-squares design
   signals.py          Tone mixture and white-noise signal generation
+  adaptive.py         run_lms(): direct-error LMS loop
+  fxlms.py            run_fxlms(): batch FxLMS loop with divergence checks
+  streaming.py        StreamingFxLMS: per-sample reference for the C++ port
   simulate.py         run(): fixed-controller simulation loop
   metrics.py          rms(), attenuation_db()
+  types.py            Shared FloatArray type alias
 
 experiments/          Numbered experiment scripts
   step1_fixed_baseline.py   Offline FIR controller (least-squares)
@@ -30,10 +34,10 @@ experiments/          Numbered experiment scripts
 
 configs/              YAML configuration files (one per experiment)
 tests/                pytest suite
-cpp/                  C++ re-implementation (CMake)
+cpp/                  C++ port of the FxLMS controller + S_hat filter (CMake)
 realtime/             Real-time scripts (secondary-path measurement, live ANC)
 results/              Generated outputs (gitignored)
-docs/figures/         Generated figures (gitignored)
+docs/figures/         Generated figures
 ```
 
 ## Installation
@@ -57,7 +61,83 @@ python -m experiments.step3_fxlms_mismatch
 python -m experiments.step4_benchmark
 ```
 
-The step 1 baseline achieves ~24.5 dB attenuation at 2 kHz sample rate on a 4-second tone mixture (80, 120, 160 Hz) with a 32-tap offline FIR controller.
+## Conventions
+
+Every controller in the project uses the same sign convention. The error
+(residual) is the sum of the unwanted noise and the anti-noise,
+
+```text
+e[n] = d[n] + y'[n]        w <- w - mu * e[n] * x[n]      (x' for FxLMS)
+```
+
+so a converged filter produces the *negative* of the unwanted signal.
+`run_lms` follows this too: its filter converges to the negative of the
+path that generates the desired signal.
+
+## Results
+
+All results use a 2 kHz sample rate and a 4-second mixture of 80, 120 and
+160 Hz tones plus white noise (std 0.03), a 32-tap controller, and a 0.5 s
+transient excluded from the evaluation.
+
+| Step | Method | Attenuation |
+| ---- | ------ | ----------- |
+| 1 | Fixed FIR, offline least squares | 24.5 dB |
+| 2 | LMS, direct error (no secondary path) | 15.4 dB |
+| 3 | FxLMS, mismatched S_hat | 18.8 dB |
+| 4 | Benchmark, 5 seeds, held-out test signal | see below |
+
+Step 4 (mean +/- std over seeds 42-46):
+
+| Method | Attenuation |
+| ------ | ----------- |
+| Fixed FIR | 24.43 +/- 0.11 dB |
+| FxLMS, matched S_hat | 18.98 +/- 0.04 dB |
+| FxLMS, mismatched S_hat | 18.79 +/- 0.04 dB |
+
+The mismatch costs only ~0.2 dB, so FxLMS tolerates the modeled error in the
+secondary-path estimate. The fixed FIR is better because it is a one-shot
+least-squares fit on the whole signal, whereas FxLMS pays a misadjustment
+cost for tracking with a small step size. The Step 2 figure is not
+comparable to the others: it has no secondary path.
+
+### Why Step 1 stops at ~24.5 dB
+
+The tones are cancelled almost completely (see `docs/figures/step1_psd.png`,
+where the three peaks drop by roughly 50 dB). The limit comes from the white
+noise. The primary path has no delay (its first tap is 0.80) while the
+secondary path adds 2 samples, so the controller would need to see two samples
+into the future to cancel the broadband part of the noise. A causal controller
+cannot, and the sinusoids are the only part predictable enough to cancel. The
+unpredictable noise through the primary path has an RMS of about 0.025 against
+a 0.52 total, which caps the attenuation near 26.5 dB. The fit also redistributes
+noise: the residual PSD is a few dB above the primary PSD between roughly 200
+and 600 Hz.
+
+## C++ port
+
+`cpp/` ports only the controller and the S_hat filter. The plant model stays
+in Python as part of the test setup.
+
+The interface is `float FxLMS::process(float x, float e)`, in the
+audio-callback order: x[n] and e[n] arrive together and e[n] only reflects
+outputs up to y[n-1]. Each call (1) updates the weights with the stored
+filtered-reference history, (2) pushes x[n] and x'[n] into the histories, and
+(3) returns y[n]. `anc/streaming.py` is the Python reference with exactly that
+order. The batch `run_fxlms` computes y[n], then e[n], then updates in the same
+step, so it is a different algorithm and is not what the port is compared to.
+
+```bash
+cmake -S cpp -B cpp/build && cmake --build cpp/build
+pytest tests/test_cpp_parity.py
+```
+
+The parity test is open-loop. Python simulates the loop once, records x and e
+under `tests/data/`, and both implementations consume those same sequences,
+so float32 differences cannot compound through the feedback path. It compares
+y[n] and the final weights. The tolerance is derived from running the Python
+reference in float32 once: the C++ error against float64 must stay within 3x
+of that float32-vs-float64 drift (about 2.4e-6 on y for this configuration).
 
 ## Tests
 
