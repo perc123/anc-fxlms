@@ -17,6 +17,14 @@ signal:
 benchmark:
   seeds: [42, 43, 44, 45, 46]
   transient_s: 0.5
+  block_duration_s: 0.1
+  steady_state_fraction: 0.2
+  convergence_tolerance_db: 1.0
+  consecutive_blocks: 3
+
+safety:
+  max_weight_norm: 100.0
+  max_abs_residual: 10.0
 
 plant:
   primary_taps: [0.80, 0.00, 0.15, 0.00, -0.08, 0.00, 0.04]
