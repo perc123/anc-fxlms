@@ -7,15 +7,17 @@ from anc.controllers import FixedFIRController
 from anc.simulate import SimulationTrace
 from anc.adaptive import LMSTrace
 from anc.fxlms import FxLMSTrace
+from anc.convergence import ConvergenceMetrics
 
 
 def plot_fxlms_results(
-        trace: FxLMSTrace,
-        sample_rate_hz: int,
-        output_dir: Path | None = None,
-        show: bool = False,
+    trace: FxLMSTrace,
+    sample_rate_hz: int,
+    output_dir: Path | None = None,
+    show: bool = False,
+    convergence_metrics: ConvergenceMetrics | None = None,
 ) -> list[Path]:
-    """Plot FxLMS signals, learning curve and coefficient evolution."""
+    """Plot FxLMS signals, convergence metrics, and coefficient evolution."""
 
     if sample_rate_hz <= 0:
         raise ValueError("sample_rate_hz must be positive.")
@@ -24,7 +26,7 @@ def plot_fxlms_results(
         output_dir.mkdir(parents=True, exist_ok=True)
 
     n_samples = trace.reference.size
-    time_s = np.arange(n_samples) /sample_rate_hz
+    time_s = np.arange(n_samples) / sample_rate_hz
     saved_paths: list[Path] = []
 
     def finish(fig: plt.Figure, filename: str) -> None:
@@ -40,10 +42,16 @@ def plot_fxlms_results(
 
         plt.close(fig)
 
-    # 1. Primary noise, anti- noise and residual.
+    # ---------------------------------------------------------
+    # 1. Time-domain signals.
+    # ---------------------------------------------------------
     shown = min(n_samples, sample_rate_hz)
 
-    fig, axes = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
+    fig, axes = plt.subplots(
+        2, 1,
+        figsize=(11, 7),
+        sharex=True,
+    )
 
     axes[0].plot(
         time_s[:shown],
@@ -56,55 +64,154 @@ def plot_fxlms_results(
         label="Anti-noise",
         alpha=0.8,
     )
-    axes[0].set_title("Primary noise and secondary-path anti-noise")
+
+    axes[0].set_title(
+        "Primary noise and secondary-path anti-noise"
+    )
     axes[0].set_ylabel("Amplitude")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 
-    axes[1].plot(time_s[:shown], trace.residual[:shown])
+    axes[1].plot(
+        time_s[:shown],
+        trace.residual[:shown],
+    )
     axes[1].set_title("Residual at the error microphone")
     axes[1].set_xlabel("Time (s)")
     axes[1].set_ylabel("Amplitude")
     axes[1].grid(True, alpha=0.3)
 
-    finish(fig, "step3_fxlms_mismatch_timeseries.png")
+    finish(
+        fig,
+        "step3_fxlms_mismatch_timeseries.png",
+    )
 
-    # 2. Non-overlapping 100 ms RMS learning curve.
-    block_size = max(1, int(round(0.1 * sample_rate_hz)))
-    block_times: list[float] = []
-    primary_rms: list[float] = []
-    residual_rms: list[float] = []
+    # ---------------------------------------------------------
+    # 2. Learning curve and convergence indicators.
+    # ---------------------------------------------------------
+    fig, ax = plt.subplots(figsize=(11, 5))
 
-    for start in range(0, n_samples, block_size):
-        stop = min(start + block_size, n_samples)
-
-        block_times.append((start + stop) / (2 * sample_rate_hz))
-        primary_block = trace.primary_noise[start:stop]
-        residual_block = trace.residual[start:stop]
-
-        primary_rms.append(
-            float(np.sqrt(np.mean(primary_block**2)))
+    if convergence_metrics is not None:
+        block_times = (
+            convergence_metrics.block_start_times_s
         )
-        residual_rms.append(
-            float(np.sqrt(np.mean(residual_block**2)))
+        primary_rms = (
+            convergence_metrics.block_primary_rms
+        )
+        residual_rms = (
+            convergence_metrics.block_residual_rms
         )
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(block_times, primary_rms, label="Primary-noise RMS")
-    ax.plot(block_times, residual_rms, label="Residual RMS")
-    ax.set_title("FxLMS convergence (100 ms block RMS)")
+        ax.plot(
+            block_times,
+            primary_rms,
+            label="Primary-noise RMS",
+        )
+        ax.plot(
+            block_times,
+            residual_rms,
+            label="Residual RMS",
+        )
+
+        steady_state_time = (
+            convergence_metrics.steady_state_start_sample
+            / sample_rate_hz
+        )
+
+        ax.axvline(
+            steady_state_time,
+            linestyle=":",
+            linewidth=1.5,
+            label="Steady-state window begins",
+        )
+
+        if convergence_metrics.convergence_time_s is not None:
+            ax.axvline(
+                convergence_metrics.convergence_time_s,
+                linestyle="--",
+                linewidth=1.5,
+                label="Convergence time",
+            )
+
+    else:
+        # A diverged run has no valid full-run convergence metrics.
+        # Plot only complete blocks from the processed portion.
+        valid_samples = trace.processed_samples
+        block_size = int(round(0.1 * sample_rate_hz))
+
+        block_times = []
+        primary_rms = []
+        residual_rms = []
+
+        for start in range(0, valid_samples, block_size):
+            stop = min(start + block_size, valid_samples)
+
+            if stop - start < block_size:
+                break
+
+            block_times.append(start / sample_rate_hz)
+
+            primary_rms.append(
+                float(
+                    np.sqrt(
+                        np.mean(
+                            trace.primary_noise[start:stop] ** 2
+                        )
+                    )
+                )
+            )
+
+            residual_rms.append(
+                float(
+                    np.sqrt(
+                        np.mean(
+                            trace.residual[start:stop] ** 2
+                        )
+                    )
+                )
+            )
+
+        ax.plot(
+            block_times,
+            primary_rms,
+            label="Primary-noise RMS",
+        )
+        ax.plot(
+            block_times,
+            residual_rms,
+            label="Residual RMS",
+        )
+
+        ax.set_title(
+            "FxLMS learning curve — incomplete run"
+        )
+
+    ax.set_title(
+        "FxLMS learning curve and convergence"
+        if convergence_metrics is not None
+        else "FxLMS learning curve — incomplete run"
+    )
     ax.set_xlabel("Time (s)")
-    ax.set_ylabel("RMS amplitude")
+    ax.set_ylabel("Block RMS amplitude")
     ax.legend()
     ax.grid(True, alpha=0.3)
 
-    finish(fig, "step3_fxlms_mismatch_learning_curve.png")
+    finish(
+        fig,
+        "step3_fxlms_mismatch_learning_curve.png",
+    )
 
-    # 3. Track the first eight coefficients.
-    fig, ax = plt.subplots(figsize=(10, 5))
+    # ---------------------------------------------------------
+    # 3. Controller coefficient evolution.
+    # ---------------------------------------------------------
+    fig, ax = plt.subplots(figsize=(11, 5))
 
     for k in range(min(8, trace.weights.shape[1])):
-        ax.plot(time_s, trace.weights[:, k], label=f"Tap {k}")
+        ax.plot(
+            time_s,
+            trace.weights[:, k],
+            label=f"Tap {k}",
+        )
 
     ax.set_title("FxLMS coefficient evolution")
     ax.set_xlabel("Time (s)")
@@ -112,9 +219,13 @@ def plot_fxlms_results(
     ax.legend(ncol=2)
     ax.grid(True, alpha=0.3)
 
-    finish(fig, "step3_fxlms_mismatch_weights.png")
+    finish(
+        fig,
+        "step3_fxlms_mismatch_weights.png",
+    )
 
     return saved_paths
+
 
 def plot_results(
         trace: SimulationTrace,

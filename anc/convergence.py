@@ -7,7 +7,7 @@ FloatArray = NDArray[np.float64]
 
 
 @dataclass(frozen=True)
-class ConvergenceResult:
+class ConvergenceMetrics:
     """Performance and convergence measurements for an ANC run."""
 
     block_start_times_s: FloatArray
@@ -32,7 +32,7 @@ def analyze_convergence(
         steady_state_fraction: float = 0.2,
         tolerance_db: float = 1.0,
         consecutive_blocks: int = 3,
-) -> ConvergenceResult:
+) -> ConvergenceMetrics:
     """Calculate block RMS, steady-state attenuation and convergence time for an ANC run.
     The steady-state RMS is calculated over the final fraction of the specified evaluation interval.
 
@@ -218,7 +218,7 @@ def analyze_convergence(
             )
             break
 
-    return ConvergenceResult(
+    return ConvergenceMetrics(
         block_start_times_s=block_start_times_s,
         block_primary_rms=block_primary_rms,
         block_residual_rms=block_residual_rms,

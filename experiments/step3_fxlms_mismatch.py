@@ -295,6 +295,7 @@ def main() -> None:
         sample_rate_hz=sample_rate_hz,
         output_dir=figure_dir,
         show=show_figures,
+        convergence_metrics=convergence_metrics,
     )
 
     print(f"Experiment: {experiment_cfg['name']}")
