@@ -38,3 +38,10 @@ output:
 safety:
   max_weight_norm: 100.0
   max_abs_residual: 10.0
+
+evaluation:
+  transient_s: 0.5
+  block_duration_s: 0.1
+  steady_state_fraction: 0.2
+  convergence_tolerance_db: 1.0
+  consecutive_blocks: 3
