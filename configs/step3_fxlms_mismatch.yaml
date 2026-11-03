@@ -26,9 +26,6 @@ controller:
   estimated_secondary_taps: [0.66, 0.00, 0.23, 0.00, -0.03]
   estimated_secondary_delay_samples: 2
 
-evaluation:
-  transient_s: 0.5
-
 output:
   directory: results/step3_fxlms_mismatch
   figure_directory: docs/figures

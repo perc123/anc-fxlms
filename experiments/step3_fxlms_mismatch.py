@@ -11,6 +11,7 @@ from anc.fxlms import run_fxlms
 from anc.metrics import attenuation_db, rms
 from anc.plant import ANCPlant
 from anc.signals import generate_tone_mixture
+from anc.convergence import analyze_convergence
 from experiments.plotting import plot_fxlms_results
 
 
@@ -121,16 +122,14 @@ def main() -> None:
             "shorter than the signal duration."
         )
 
+    # Only analyze samples that the FxLMS simulation actually processed.
     valid_samples = trace.processed_samples
 
-    if valid_samples <= start_sample:
-        primary_rms = float("nan")
-        residual_rms = float("nan")
-        anc_attenuation_db = float("nan")
-    else:
-        primary_valid = trace.primary_noise[:valid_samples]
-        residual_valid = trace.residual[:valid_samples]
+    primary_valid = trace.primary_noise[:valid_samples]
+    residual_valid = trace.residual[:valid_samples]
 
+    # Calculate performance over the available evaluation interval.
+    if valid_samples > start_sample:
         primary_rms = rms(primary_valid[start_sample:])
         residual_rms = rms(residual_valid[start_sample:])
 
@@ -139,11 +138,37 @@ def main() -> None:
             residual_valid,
             start_sample=start_sample,
         )
+    else:
+        primary_rms = float("nan")
+        residual_rms = float("nan")
+        anc_attenuation_db = float("nan")
+
+    # Calculate steady-state and convergence metrics only for a
+    # fully completed run. A diverged run cannot establish steady state.
+    convergence_metrics = None
+
+    if trace.status == "completed":
+        if valid_samples != reference.size:
+            raise RuntimeError(
+                "Completed run does not contain the full reference signal."
+            )
+
+        convergence_metrics = analyze_convergence(
+            primary_noise=primary_valid,
+            residual=residual_valid,
+            sample_rate_hz=sample_rate_hz,
+            start_sample=start_sample,
+            block_duration_s=float(evaluation_cfg.get("block_duration_s", 0.1)),
+            steady_state_fraction=float(evaluation_cfg.get("steady_state_fraction", 0.2)),
+            tolerance_db=float(evaluation_cfg.get("convergence_tolerance_db", 1.0)),
+            consecutive_blocks=int(evaluation_cfg.get("consecutive_blocks", 3)),
+        )
 
     results_dir = resolve_path(output_cfg["directory"])
     results_dir.mkdir(parents=True, exist_ok=True)
 
     traces_path = results_dir / "traces.npz"
+
     np.savez_compressed(
         traces_path,
         reference=trace.reference,
@@ -162,9 +187,78 @@ def main() -> None:
         divergence_reason=np.asarray(
             trace.divergence_reason or ""
         ),
+        block_start_times_s=(
+            convergence_metrics.block_start_times_s
+            if convergence_metrics is not None
+            else np.empty(0, dtype=np.float64)
+        ),
+        block_primary_rms=(
+            convergence_metrics.block_primary_rms
+            if convergence_metrics is not None
+            else np.empty(0, dtype=np.float64)
+        ),
+        block_residual_rms=(
+            convergence_metrics.block_residual_rms
+            if convergence_metrics is not None
+            else np.empty(0, dtype=np.float64)
+        ),
+        steady_state_start_sample=np.asarray(
+            convergence_metrics.steady_state_start_sample
+            if convergence_metrics is not None
+            else -1
+        ),
+        steady_state_primary_rms=np.asarray(
+            convergence_metrics.steady_state_primary_rms
+            if convergence_metrics is not None
+            else np.nan
+        ),
+        steady_state_residual_rms=np.asarray(
+            convergence_metrics.steady_state_residual_rms
+            if convergence_metrics is not None
+            else np.nan
+        ),
+        steady_state_attenuation_db=np.asarray(
+            convergence_metrics.steady_state_attenuation_db
+            if convergence_metrics is not None
+            else np.nan
+        ),
+        convergence_time_s=np.asarray(
+            convergence_metrics.convergence_time_s
+            if convergence_metrics is not None
+            and convergence_metrics.convergence_time_s is not None
+            else np.nan
+        ),
     )
 
     metrics_path = results_dir / "metrics.txt"
+    if convergence_metrics is None:
+        steady_state_primary_text = "N/A (run diverged)"
+        steady_state_residual_text = "N/A (run diverged)"
+        steady_state_attenuation_text = "N/A (run diverged)"
+        convergence_time_text = "N/A (run diverged)"
+        steady_state_start_text = "N/A (run diverged)"
+    else:
+        steady_state_primary_text = (
+            f"{convergence_metrics.steady_state_primary_rms:.8f}"
+        )
+        steady_state_residual_text = (
+            f"{convergence_metrics.steady_state_residual_rms:.8f}"
+        )
+        steady_state_attenuation_text = (
+            f"{convergence_metrics.steady_state_attenuation_db:.4f} dB"
+        )
+
+        steady_state_start_text = (
+            f"{convergence_metrics.steady_state_start_sample}"
+        )
+
+        if convergence_metrics.convergence_time_s is None:
+            convergence_time_text = "Not reached within experiment duration"
+        else:
+            convergence_time_text = (
+                f"{convergence_metrics.convergence_time_s:.3f} s"
+            )
+
     metrics_text = (
         f"Experiment: {experiment_cfg['name']}\n"
         f"Sample rate: {sample_rate_hz} Hz\n"
@@ -172,21 +266,18 @@ def main() -> None:
         f"Controller length: {controller.filter_length} taps\n"
         f"FxLMS step size: {controller.step_size}\n"
         f"Evaluation transient: {transient_s} s\n"
-        f"Actual secondary taps: "
-        f"{plant.secondary_taps.tolist()}\n"
-        f"Actual secondary delay: "
-        f"{plant.secondary_delay_samples} samples\n"
-        f"Estimated secondary taps: "
-        f"{controller.estimated_secondary_taps.tolist()}\n"
-        f"Estimated secondary delay: "
-        f"{controller.estimated_secondary_delay_samples} samples\n"
-        f"Primary-noise RMS: {primary_rms:.8f}\n"
-        f"Residual RMS: {residual_rms:.8f}\n"
-        f"ANC attenuation: {anc_attenuation_db:.4f} dB\n"
         f"Run status: {trace.status}\n"
         f"Processed samples: {trace.processed_samples} / {reference.size}\n"
         f"Divergence sample: {trace.divergence_sample}\n"
         f"Divergence reason: {trace.divergence_reason or 'None'}\n"
+        f"Primary-noise RMS: {primary_rms:.8f}\n"
+        f"Residual RMS: {residual_rms:.8f}\n"
+        f"Evaluation attenuation: {anc_attenuation_db:.4f} dB\n"
+        f"Steady-state start sample: {steady_state_start_text}\n"
+        f"Steady-state primary RMS: {steady_state_primary_text}\n"
+        f"Steady-state residual RMS: {steady_state_residual_text}\n"
+        f"Steady-state attenuation: {steady_state_attenuation_text}\n"
+        f"Convergence time: {convergence_time_text}\n"
     )
     metrics_path.write_text(metrics_text, encoding="utf-8")
 
@@ -220,6 +311,7 @@ def main() -> None:
 
     for path in figure_paths:
         print(f"Figure saved to: {path}")
+
     print(f"Run status: {trace.status}")
     print(
         f"Processed samples: "
@@ -229,6 +321,30 @@ def main() -> None:
 
     if trace.divergence_reason:
         print(f"Divergence reason: {trace.divergence_reason}")
+
+    if convergence_metrics is not None:
+        print(
+            "Steady-state primary RMS: "
+            f"{convergence_metrics.steady_state_primary_rms:.8f}"
+        )
+        print(
+            "Steady-state residual RMS: "
+            f"{convergence_metrics.steady_state_residual_rms:.8f}"
+        )
+        print(
+            "Steady-state attenuation: "
+            f"{convergence_metrics.steady_state_attenuation_db:.4f} dB"
+        )
+
+        if convergence_metrics.convergence_time_s is None:
+            print("Convergence time: Not reached")
+        else:
+            print(
+                "Convergence time: "
+                f"{convergence_metrics.convergence_time_s:.3f} s"
+            )
+    else:
+        print("Steady-state metrics: Not available (run diverged)")
 
 
 if __name__ == "__main__":
