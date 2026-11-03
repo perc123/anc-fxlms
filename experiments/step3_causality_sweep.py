@@ -79,7 +79,8 @@ def metric_statistics(
 ) -> tuple[float, float, int]:
     values = [
         float(row[metric_name])
-        for row in rowsif row["causality_margin_sample"] == margin
+        for row in rows
+        if row["causality_margin_samples"] == margin
         and row[metric_name] is not None
         and np.isfinite(float(row[metric_name]))
     ]
@@ -164,6 +165,11 @@ def main() -> None:
         dtype=np.float64,
     )
 
+    secondary_taps = np.asarray(
+        plant_cfg["secondary_taps"],
+        dtype=np.float64,
+    )
+
     if not np.isfinite(secondary_taps).all():
         raise ValueError("Secondary-path taps must be finite.")
 
@@ -185,9 +191,9 @@ def main() -> None:
         reference = generate_tone_mixture(
             sample_rate_hz=sample_rate_hz,
             duration_s=duration_s,
-            tones=signal_cfg.get["tones", []],
+            tones=signal_cfg.get("tones", []),
             white_noise_std=float(
-                signal_cfg.get("white_noies_std", 0.0)
+                signal_cfg.get("white_noise_std", 0.0)
             ),
             seed=seed,
         )
@@ -395,7 +401,8 @@ def main() -> None:
 
     for margin in margins:
         group = [
-            row for row in rowsif row ["causality_margin_samples"] == margin
+            row for row in rows
+            if row["causality_margin_samples"] == margin
         ]
 
         completed = sum(
