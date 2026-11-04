@@ -18,6 +18,9 @@ from anc.plant import ANCPlant
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+DISPLAY_CEILING_DB = 60.0
+
+
 def resolve_path(path_string: str) -> Path:
     path = Path(path_string)
     if path.is_absolute():
@@ -556,10 +559,27 @@ def main() -> None:
             gridspec_kw={"height_ratios": [3, 1]},
         )
 
+        # Display ceiling only. The simulation is noiseless with a
+        # deterministic tone, so the residual can become arbitrarily small;
+        # values above the ceiling are not physical ANC performance.
+        # CSV and summary keep the unclipped measurements.
+        means_arr = np.asarray(means, dtype=np.float64)
+        stds_arr = np.asarray(stds, dtype=np.float64)
+        plot_means = np.minimum(means_arr, DISPLAY_CEILING_DB)
+        plot_upper = np.minimum(
+            means_arr + stds_arr, DISPLAY_CEILING_DB
+        )
+        plot_lower = np.minimum(
+            means_arr - stds_arr, DISPLAY_CEILING_DB
+        )
+        yerr = np.vstack(
+            (plot_means - plot_lower, plot_upper - plot_means)
+        )
+
         ax1.errorbar(
             phase_errors,
-            means,
-            yerr=stds,
+            plot_means,
+            yerr=yerr,
             marker="o",
             capsize=4,
             linewidth=1.5,
@@ -581,7 +601,19 @@ def main() -> None:
             linewidth=1.0,
         )
 
-        ax1.set_ylabel("Evaluation attenuation (dB)")
+        ax1.axhline(
+            DISPLAY_CEILING_DB,
+            color="red",
+            linestyle="-.",
+            linewidth=1.0,
+            label=(
+                f"{DISPLAY_CEILING_DB:g} dB display ceiling "
+                "(visualization limit)"
+            ),
+        )
+        ax1.set_ylim(top=DISPLAY_CEILING_DB * 1.05)
+
+        ax1.set_ylabel("Evaluation attenuation (dB, clipped for display)")
         ax1.set_title(
             "Narrowband FxLMS performance versus "
             "secondary-path phase error"

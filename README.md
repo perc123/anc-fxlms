@@ -114,6 +114,17 @@ a 0.52 total, which caps the attenuation near 26.5 dB. The fit also redistribute
 noise: the residual PSD is a few dB above the primary PSD between roughly 200
 and 600 Hz.
 
+### Step 3 phase-error sweep: note on large attenuation values
+
+`experiments/step3_phase_error_sweep.py` uses a deterministic sinusoidal
+reference and no sensor noise, so the residual can become extremely small and
+the raw attenuation reaches well above 100 dB. Those numbers are not
+achievable physical ANC performance. The figure
+`docs/figures/step3_phase_error_sweep.png` clips the plotted attenuation at
+60 dB and labels this as a visualization limit. The unclipped measurements
+remain in `results/step3_phase_error_sweep/per_seed_results.csv` for
+reproducibility.
+
 ## C++ port
 
 `cpp/` ports only the controller and the S_hat filter. The plant model stays
