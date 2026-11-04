@@ -24,18 +24,27 @@ anc/                  Core DSP library
   streaming.py        StreamingFxLMS: per-sample reference for the C++ port
   simulate.py         run(): fixed-controller simulation loop
   metrics.py          rms(), attenuation_db()
+  convergence.py      analyze_convergence(): block RMS, steady-state
+                      attenuation, convergence time
   types.py            Shared FloatArray type alias
 
 experiments/          Numbered experiment scripts
   step1_fixed_baseline.py   Offline FIR controller (least-squares)
   step2_lms.py              Online LMS adaptive controller
   step3_fxlms_mismatch.py   FxLMS with secondary-path mismatch
+  step3_causality_sweep.py  FxLMS versus causality margin (primary delay
+                            minus secondary delay)
+  step3_phase_error_sweep.py  FxLMS versus secondary-path phase error
+                            (estimated-delay sweep at one tone)
   step4_benchmark.py        Comparative benchmark across controllers
+  plotting.py               Shared plotting helpers
 
 configs/              YAML configuration files (one per experiment)
 tests/                pytest suite
 cpp/                  C++ port of the FxLMS controller + S_hat filter (CMake)
-realtime/             Real-time scripts (secondary-path measurement, live ANC)
+realtime/             Placeholders for secondary-path measurement and live
+                      ANC (empty, not implemented yet)
+.github/workflows/    CI: build the C++ port and run pytest
 results/              Generated outputs (gitignored)
 docs/figures/         Generated figures
 ```
@@ -58,6 +67,8 @@ Each experiment reads a YAML config and writes results to `results/`.
 python -m experiments.step1_fixed_baseline
 python -m experiments.step2_lms
 python -m experiments.step3_fxlms_mismatch
+python -m experiments.step3_causality_sweep
+python -m experiments.step3_phase_error_sweep
 python -m experiments.step4_benchmark
 ```
 
@@ -79,6 +90,9 @@ path that generates the desired signal.
 All results use a 2 kHz sample rate and a 4-second mixture of 80, 120 and
 160 Hz tones plus white noise (std 0.03), a 32-tap controller, and a 0.5 s
 transient excluded from the evaluation.
+
+The causality and phase-error sweeps use their own signals and are described
+in their sections below.
 
 | Step | Method | Attenuation |
 | ---- | ------ | ----------- |
@@ -114,16 +128,34 @@ a 0.52 total, which caps the attenuation near 26.5 dB. The fit also redistribute
 noise: the residual PSD is a few dB above the primary PSD between roughly 200
 and 600 Hz.
 
-### Step 3 phase-error sweep: note on large attenuation values
+### Step 3 causality sweep
 
-`experiments/step3_phase_error_sweep.py` uses a deterministic sinusoidal
-reference and no sensor noise, so the residual can become extremely small and
-the raw attenuation reaches well above 100 dB. Those numbers are not
-achievable physical ANC performance. The figure
-`docs/figures/step3_phase_error_sweep.png` clips the plotted attenuation at
-60 dB and labels this as a visualization limit. The unclipped measurements
-remain in `results/step3_phase_error_sweep/per_seed_results.csv` for
-reproducibility.
+`step3_causality_sweep.py` runs FxLMS on white noise (no tones) with a
+2-sample secondary delay and varies the primary-path delay, so the causality
+margin (primary delay minus secondary delay) ranges from -2 to +4 samples,
+over 5 seeds. With a negative margin the anti-noise cannot arrive in time and
+attenuation is about 0 dB (0.01 +/- 0.03 dB). From a margin of 0 upward it is
+roughly 30 to 33 dB (33.3 dB at margin 0, 30.5 dB at +4).
+
+### Step 3 phase-error sweep
+
+`step3_phase_error_sweep.py` drives a single 125 Hz tone through a plant with
+an 8-sample secondary delay and a 12-sample primary delay (margin +4). The
+secondary-path estimate S_hat is given a delay from 0 to 16 samples, which
+produces phase errors from -180 to +180 degrees at 125 Hz, 5 seeds each. In
+this run every seed converged for phase errors from -67.5 to +67.5 degrees and
+every seed diverged at +/-90 degrees and beyond, consistent with the usual
++/-90 degree stability limit of FxLMS.
+
+#### Note on large attenuation values
+
+The sweep uses a deterministic sinusoidal reference and no sensor noise, so
+the residual can become extremely small and the raw attenuation reaches well
+above 100 dB. Those numbers are not achievable physical ANC performance. The
+figure `docs/figures/step3_phase_error_sweep.png` clips the plotted
+attenuation at 60 dB and labels this as a visualization limit. The unclipped
+measurements remain in `results/step3_phase_error_sweep/per_seed_results.csv`
+for reproducibility.
 
 ## C++ port
 
@@ -163,6 +195,8 @@ pytest
 | 1 | Fixed FIR (offline least-squares) | `configs/step1_fixed.yaml` |
 | 2 | Online LMS | `configs/step2_lms.yaml` |
 | 3 | FxLMS with secondary-path mismatch | `configs/step3_fxlms_mismatch.yaml` |
+| 3 | FxLMS causality sweep | `configs/step3_causality_sweep.yaml` |
+| 3 | FxLMS phase-error sweep | `configs/step3_phase_error_sweep.yaml` |
 | 4 | Benchmark | `configs/benchmark.yaml` |
 
 ## Dependencies
