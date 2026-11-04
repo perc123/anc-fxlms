@@ -221,6 +221,11 @@ def main() -> None:
     if base_primary_taps.ndim != 1 or base_primary_taps.size == 0:
         raise ValueError("Primary-path taps must be a non-empty vector.")
 
+    secondary_taps = np.asarray(
+        plant_cfg["secondary_taps"],
+        dtype=np.float64,
+    )
+
     if secondary_taps.ndim != 1 or secondary_taps.size == 0:
         raise ValueError("Secondary-path taps must be a non-empty vector.")
 
@@ -386,7 +391,7 @@ def main() -> None:
             attenuation_text = (
                 "N/A"
                 if evaluation_attenuation is None
-                else f"{evaluation_attenuation:.f} dB"
+                else f"{evaluation_attenuation:.2f} dB"
             )
 
             print(
