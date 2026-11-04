@@ -1,0 +1,54 @@
+experiment:
+  name: step2_signal_variants
+  seeds: [42, 43, 44, 45, 46]
+
+signal:
+  sample_rate_hz: 2000
+  duration_s: 4.0
+
+  variants:
+    - name: single_tone
+      type: single_tone
+      frequency_hz: 80.0
+      amplitude: 1.0
+
+    - name: multi_tone
+      type: multi_tone
+      tones:
+        - frequency_hz: 80.0
+          amplitude: 0.7
+        - frequency_hz: 120.0
+          amplitude: 0.4
+        - frequency_hz: 160.0
+          amplitude: 0.2
+
+    - name: white_noise
+      type: white_noise
+      noise_std: 0.5
+
+    - name: band_limited_noise
+      type: band_limited_noise
+      low_cutoff_hz: 50.0
+      high_cutoff_hz: 300.0
+      noise_std: 0.5
+      filter_length: 129
+
+plant:
+  primary_taps: [0.80, 0.00, 0.15, 0.00, -0.08, 0.00, 0.04]
+
+controller:
+  length: 32
+  step_size: 0.001
+
+evaluation:
+  transient_s: 0.5
+  block_duration_s: 0.1
+  steady_state_fraction: 0.2
+  convergence_tolerance_db: 1.0
+  consecutive_blocks: 3
+
+output:
+  directory: results/step2_signal_variants
+  figure_directory: docs/figures/step2_signal_variants
+  save_figures: true
+  show_figures: false
