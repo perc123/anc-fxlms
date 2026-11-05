@@ -46,6 +46,10 @@ def test_lms_trace_has_expected_shapes():
     assert trace.error.shape == (100,)
     assert trace.weights.shape == (100, 4)
     assert np.isfinite(trace.weights).all()
+    assert trace.status == "completed"
+    assert trace.processed_samples == reference.size
+    assert trace.divergence_sample is None
+    assert trace.divergence_reason is None
 
 def test_lms_reduces_error_for_constant_reference():
     reference = np.ones(500)
@@ -55,3 +59,76 @@ def test_lms_reduces_error_for_constant_reference():
     trace = run_lms(reference, desired, controller)
 
     assert abs(trace.error[-1]) < abs(trace.error[0])
+
+
+def test_lms_detects_excessive_step_size_divergence():
+    reference = np.ones(20)
+    desired = np.ones(20)
+
+    controller = LMSController(
+        filter_length=1,
+        step_size=3.0,
+    )
+
+    trace = run_lms(
+        reference=reference,
+        desired=desired,
+        controller=controller,
+        max_weight_norm=10.0,
+    )
+
+    assert trace.status == "diverged"
+    assert trace.divergence_sample == 3
+    assert trace.processed_samples == 4
+    assert "weight norm" in trace.divergence_reason
+
+    assert np.isfinite(trace.error[:4]).all()
+    assert np.isnan(trace.error[4:]).all()
+
+
+def test_lms_detects_error_amplitude_limit():
+    reference = np.zeros(20)
+    desired = np.ones(20)
+
+    controller = LMSController(
+        filter_length=1,
+        step_size=0.001,
+    )
+
+    trace = run_lms(
+        reference=reference,
+        desired=desired,
+        controller=controller,
+        max_abs_error=0.5,
+    )
+
+    assert trace.status == "diverged"
+    assert trace.divergence_sample == 0
+    assert trace.processed_samples == 1
+    assert "Prediction error amplitude" in trace.divergence_reason
+
+
+def test_lms_rejects_invalid_safety_limits():
+    reference = np.ones(20)
+    desired = np.ones(20)
+
+    controller = LMSController(
+        filter_length=1,
+        step_size=0.001,
+    )
+
+    with pytest.raises(ValueError):
+        run_lms(
+            reference,
+            desired,
+            controller,
+            max_weight_norm=0.0,
+        )
+
+    with pytest.raises(ValueError):
+        run_lms(
+            reference,
+            desired,
+            controller,
+            max_abs_error=float("inf"),
+        )
