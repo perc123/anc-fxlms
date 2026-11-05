@@ -23,3 +23,5 @@ include = ["anc*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# experiments/ is not an installed package; tests import it from the repo root.
+pythonpath = ["."]
