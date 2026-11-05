@@ -1,0 +1,33 @@
+experiment:
+  name: step2_lms_step_size_sweep
+  sample_rate_hz: 2000
+  duration_s: 4.0
+  seeds: [42, 43, 44, 45, 46]
+
+signal:
+  standard_deviation: 0.5
+
+plant:
+  primary_taps: [0.80, 0.0, 0.15, 0.0, -0.08, 0.0, 0.04]
+
+controller:
+  filter_length: 32
+  step_sizes:
+    - 0.20
+    - 0.205
+    - 0.21
+    - 0.215
+    - 0.22
+    - 0.225
+    - 0.23
+    - 0.235
+    - 0.24
+    - 0.245
+    - 0.25
+
+safety:
+  max_weight_norm: 10.0
+  max_abs_error: 10.0
+
+evaluation:
+  transient_duration_s: 0.5
