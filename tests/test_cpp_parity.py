@@ -119,17 +119,18 @@ def test_streaming_requires_secondary_delay():
         run_streaming_closed_loop(np.ones(10), plant, controller)
 
 
-def test_streaming_update_precedes_output():
-    # First call: weights are zero, so y[0] = 0 and nothing is updated yet.
+def test_streaming_update_follows_filtered_push():
+    # The update pairs e[n] with x'[n], so it sees the sample just pushed and
+    # y[n] already uses the updated weights, including on the first call.
     controller = StreamingFxLMS(2, 0.1, np.array([1.0]))
-    assert controller.process(1.0, 0.5) == 0.0
-    np.testing.assert_array_equal(controller.weights, [0.0, 0.0])
+    y = controller.process(1.0, 0.5)
+    np.testing.assert_allclose(controller.weights, [-0.05, 0.0])
+    assert y == pytest.approx(-0.05 * 1.0)
 
-    # Second call updates with x'[0] = 1 (and zeros behind it) and e = 1.0
-    # before predicting, so y[1] already uses the new weights.
+    # Second call: x' history is [2, 1], so w -= 0.1 * 1.0 * [2, 1].
     y = controller.process(2.0, 1.0)
-    np.testing.assert_allclose(controller.weights, [-0.1, 0.0])
-    assert y == pytest.approx(-0.1 * 2.0)
+    np.testing.assert_allclose(controller.weights, [-0.25, -0.10])
+    assert y == pytest.approx(-0.25 * 2.0 - 0.10 * 1.0)
 
 
 def test_cpp_matches_python_open_loop(cli, recorded_io):

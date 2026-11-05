@@ -12,8 +12,8 @@ namespace anc {
 //
 // process() mirrors anc/streaming.py exactly. Each call receives x[n] and
 // e[n] together; e[n] reflects outputs up to y[n-1]. In this order it:
-//   1. updates the weights using the stored filtered-reference history,
-//   2. pushes x[n] and x'[n] = (S_hat * x)[n] into the histories,
+//   1. pushes x[n] and x'[n] = (S_hat * x)[n] into the histories,
+//   2. updates the weights with e[n] against the history ending at x'[n],
 //   3. returns y[n] = w . x_hist.
 // The plant model is not part of this class.
 class FxLMS {

@@ -58,13 +58,7 @@ void FxLMS::reset() {
 }
 
 float FxLMS::process(float x, float e) {
-    // 1. Update with the filtered-reference vector stored by the last call.
-    const float step = step_size_ * e;
-    for (std::size_t k = 0; k < filter_length_; ++k) {
-        weights_[k] -= step * xf_hist_.at(k);
-    }
-
-    // 2. Push x[n], then x'[n] = sum_k S_hat[k] * x[n - delay - k].
+    // 1. Push x[n], then x'[n] = sum_k S_hat[k] * x[n - delay - k].
     x_hist_.push(x);
     s_in_hist_.push(x);
 
@@ -73,6 +67,12 @@ float FxLMS::process(float x, float e) {
         x_filtered += s_hat_[k] * s_in_hist_.at(s_hat_delay_ + k);
     }
     xf_hist_.push(x_filtered);
+
+    // 2. Update with e[n], paired with x'[n] (the newest xf_hist_ entry).
+    const float step = step_size_ * e;
+    for (std::size_t k = 0; k < filter_length_; ++k) {
+        weights_[k] -= step * xf_hist_.at(k);
+    }
 
     // 3. Controller output.
     float y = 0.0f;

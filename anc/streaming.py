@@ -11,16 +11,21 @@ convention
 
 so a call performs, in this exact order:
 
-    1. update   w <- w - mu * e[n] * x'_hist      (x'_hist stored by the
-                                                  previous call)
-    2. push     x[n] into the reference history and the secondary-path
-                input history, compute x'[n] = (S_hat * x)[n] and push it
-                into the filtered-reference history
-    3. predict  y[n] = w . x_hist
+    1. push     x[n] into the reference history and the secondary-path
+                input history
+    2. filter   compute x'[n] = (S_hat * x)[n] and push it into the
+                filtered-reference history
+    3. update   w <- w - mu * e[n] * x'_hist      (x'_hist now ends at x'[n])
+    4. predict  y[n] = w . x_hist
 
-The batch harness in anc.fxlms computes y[n], then e[n], then updates in the
-same step. The two are intentionally different algorithms, and only this
-module matches the C++ implementation sample for sample.
+e[n] must be paired with x'[n], as in the batch harness in anc.fxlms. Updating
+before x'[n] is pushed pairs e[n] with x'[n-1], which shifts the stability
+window of the phase error by one sample of S_hat delay.
+
+The batch harness computes y[n], then e[n], then updates, so its y[n] uses
+weights adapted through e[n-1]; here y[n] also uses the update from e[n]. The
+stability behaviour is the same, and only this module matches the C++
+implementation sample for sample.
 """
 
 import numpy as np
@@ -78,10 +83,7 @@ class StreamingFxLMS:
         """Consume x[n] and e[n], return the control sample y[n]."""
         dtype = self.dtype
 
-        # 1. Update with the stored filtered-reference vector.
-        self.weights -= (self.step_size * dtype(e)) * self._xf_hist
-
-        # 2. Push the new reference sample and its filtered version.
+        # 1. Push the new reference sample and its filtered version.
         self._x_hist[1:] = self._x_hist[:-1]
         self._x_hist[0] = x
 
@@ -92,6 +94,9 @@ class StreamingFxLMS:
 
         self._xf_hist[1:] = self._xf_hist[:-1]
         self._xf_hist[0] = x_filtered
+
+        # 2. Update: e[n] is paired with x'[n], so this follows the push.
+        self.weights -= (self.step_size * dtype(e)) * self._xf_hist
 
         # 3. Controller output.
         return float(np.dot(self.weights, self._x_hist))

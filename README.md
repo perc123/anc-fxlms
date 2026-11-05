@@ -164,11 +164,15 @@ in Python as part of the test setup.
 
 The interface is `float FxLMS::process(float x, float e)`, in the
 audio-callback order: x[n] and e[n] arrive together and e[n] only reflects
-outputs up to y[n-1]. Each call (1) updates the weights with the stored
-filtered-reference history, (2) pushes x[n] and x'[n] into the histories, and
+outputs up to y[n-1]. Each call (1) pushes x[n] and x'[n] into the histories,
+(2) updates the weights with e[n] against the history ending at x'[n], and
 (3) returns y[n]. `anc/streaming.py` is the Python reference with exactly that
-order. The batch `run_fxlms` computes y[n], then e[n], then updates in the same
-step, so it is a different algorithm and is not what the port is compared to.
+order. The order matters: updating before pushing x'[n] pairs e[n] with
+x'[n-1] and shifts the stability window of the phase-error sweep by one
+sample of S_hat delay. The batch `run_fxlms` computes y[n], then e[n], then
+updates in the same step, so its y[n] uses weights one update older; it has the
+same stability window, and `tests/test_streaming_phase_sweep.py` checks that
+the streaming path reproduces it.
 
 ```bash
 cmake -S cpp -B cpp/build && cmake --build cpp/build
