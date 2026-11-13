@@ -16,8 +16,9 @@ class LMSTrace:
     desired: FloatArray
     control: FloatArray
     error: FloatArray
+    measurement_noise: FloatArray      # v[n] on the desired observation
+    measured_error: FloatArray         # (desired + v) - control
     weights: FloatArray
-
     status: RunStatus
     processed_samples: int
     divergence_sample: int | None
@@ -38,6 +39,7 @@ def run_lms(
     controller: LMSController,
     max_weight_norm: float | None = None,
     max_abs_error: float | None = None,
+    measurement_noise: FloatArray | None = None, 
 ) -> LMSTrace:
     """Run ordinary LMS on a direct-error adaptive-filter problem.
 
@@ -63,6 +65,16 @@ def run_lms(
     max_abs_error:
         Maximum permitted absolute prediction-error sample.
         Set to None to disable this limit.
+
+    With observation noise v[n] on the desired signal, the filter
+    adapts on the measured error:
+        measured_error[n] = (desired[n] + v[n]) - control[n]
+                          = error[n] + v[n]
+    trace.error and trace.desired always hold the noise-free values.
+
+    measurement_noise:
+        Observation noise v[n], same shape as desired.
+        None means a noise-free observation (identical to v[n] = 0).
     """
 
     _validate_limit("max_weight_norm", max_weight_norm)
@@ -86,6 +98,23 @@ def run_lms(
     if not np.isfinite(desired).all():
         raise ValueError("Desired signal must be finite.")
 
+    # Observation noise v[n] on the desired signal. None means a
+    # noise-free observation: v[n] = 0, identical to the original.
+    if measurement_noise is None:
+        measurement_noise = np.zeros_like(desired)
+    else:
+        measurement_noise = np.asarray(measurement_noise, dtype=np.float64)
+
+        if measurement_noise.shape != desired.shape:
+            raise ValueError(
+                "Measurement noise must match the desired-signal shape."
+            )
+
+        if not np.isfinite(measurement_noise).all():
+            raise ValueError(
+                "Measurement noise must contain only finite values."
+            )
+
     controller.reset()
 
     n_samples = reference.size
@@ -94,6 +123,7 @@ def run_lms(
     # NaN indicates that a sample was not processed.
     control = np.full(n_samples, np.nan, dtype=np.float64)
     error = np.full(n_samples, np.nan, dtype=np.float64)
+    measured_error = np.full(n_samples, np.nan, dtype=np.float64)
 
     weight_history = np.full(
         (n_samples, filter_length),
@@ -141,12 +171,18 @@ def run_lms(
             )
             break
 
-        # The output and error at this sample are valid.
+                # 3b. Form the MEASURED error against the noisy observation:
+        #       e_m[n] = (d[n] + v[n]) - y[n] = e[n] + v[n]
+        measured_error_sample = error_sample + measurement_noise[n]
+
+        # The output and errors at this sample are valid.
         control[n] = control_sample
         error[n] = error_sample
+        measured_error[n] = measured_error_sample
         processed_samples = n + 1
 
-        # 4. Check the error-amplitude safety limit.
+        # 4. Check the error-amplitude safety limit on the
+        #    signal the adaptive filter actually observes.
         if (
             max_abs_error is not None
             and abs(error_sample) > max_abs_error
@@ -171,7 +207,7 @@ def run_lms(
             with np.errstate(over="ignore", invalid="ignore"):
                 controller.update(
                     reference_history,
-                    -error_sample,
+                    -measured_error_sample,
                 )
         except FloatingPointError:
             controller.weights = weights_before_update
@@ -229,6 +265,8 @@ def run_lms(
         desired=desired,
         control=control,
         error=error,
+        measurement_noise=measurement_noise,
+        measured_error=measured_error,
         weights=weight_history,
         status=status,
         processed_samples=processed_samples,
