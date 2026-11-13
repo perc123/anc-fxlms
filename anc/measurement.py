@@ -70,3 +70,13 @@ def is_floor_limited(
     if not np.isfinite(floor_db):
         return False
     return bool(measured_attenuation_db >= floor_db - margin_db)
+
+def make_measurement_noise(
+    disturbance: np.ndarray, snr_db: float | None, seed: int | None
+) -> np.ndarray | None:
+    """Measurement noise for one run, or None when snr_db is None (noise-free)."""
+    if snr_db is None:
+        return None
+    disturbance = np.asarray(disturbance, dtype=np.float64)
+    std = noise_std_for_snr(disturbance, snr_db)
+    return generate_measurement_noise(disturbance.size, std, seed)

@@ -18,6 +18,8 @@ class FxLMSTrace:
     control: FloatArray
     anti_noise: FloatArray
     residual: FloatArray
+    measurement_noise: FloatArray      # v[n]
+    measured_error: FloatArray         # e_m[n] = residual[n] + v[n]
     filtered_reference: FloatArray
     weights: FloatArray
 
@@ -39,6 +41,7 @@ def run_fxlms(
         controller: FxLMSController,
         max_weight_norm: float | None = 1e6,
         max_abs_residual: float | None = 1e6,
+        measurement_noise: FloatArray | None = None,
 ) -> FxLMSTrace:
     """Run sample-by-sample FxLMS active noise cancellation.
         The residual convention is:
@@ -66,6 +69,16 @@ def run_fxlms(
         max_abs_residual:
             Maximum permitted absolute residual sample amplitude.
             Set to None to disable this limit.
+
+        With measurement noise v[n], the controller adapts on the
+        measured error, not the acoustic residual:
+            e_m[n] = e[n] + v[n]
+            w[n+1] = w[n] - mu * e_m[n] * filtered_reference_vector[n]
+        trace.residual always holds the acoustic residual e[n].
+
+        measurement_noise:
+            Error-microphone noise v[n], same shape as reference.
+            None means a noise-free sensor (identical to v[n] = 0).
 
     """
 
@@ -113,6 +126,23 @@ def run_fxlms(
     if not np.isfinite(primary_noise).all():
         raise ValueError("Primary noise contains NaN or infinite values.")
 
+        # Error-microphone measurement noise v[n]. None means a noise-free
+    # sensor: v[n] = 0, which reproduces the original behaviour exactly.
+    if measurement_noise is None:
+        measurement_noise = np.zeros_like(reference)
+    else:
+        measurement_noise = np.asarray(measurement_noise, dtype=np.float64)
+
+        if measurement_noise.shape != reference.shape:
+            raise ValueError(
+                "Measurement noise must match the reference shape."
+            )
+
+        if not np.isfinite(measurement_noise).all():
+            raise ValueError(
+                "Measurement noise must contain only finite values."
+            )
+        
     # Filter the reference using the controller's estimated secondary path.
     # The resulting signal is used only for adaptation.
     filtered_reference = apply_fir(
@@ -133,6 +163,7 @@ def run_fxlms(
     control = np.full(n_samples, np.nan, dtype=np.float64)
     anti_noise = np.full(n_samples, np.nan, dtype=np.float64)
     residual = np.full(n_samples, np.nan, dtype=np.float64)
+    measured_error = np.full(n_samples, np.nan, dtype=np.float64) 
 
     weights = np.full(
         (n_samples, filter_length),
@@ -204,10 +235,16 @@ def run_fxlms(
             )
             break
 
-        #These three outputs are now valid for sample n.
+                # 4b. Form the MEASURED error: what the error microphone
+        #     delivers. The controller only ever sees this value.
+        #       e_m[n] = r[n] + v[n]
+        measured_error_sample = residual_sample + measurement_noise[n]
+
+        # These outputs are now valid for sample n.
         control[n] = control_sample
         anti_noise[n] = anti_noise_sample
         residual[n] = residual_sample
+        measured_error[n] = measured_error_sample
         processed_samples = n + 1
 
         # Check the residual safety limit before adaptation.
@@ -239,7 +276,7 @@ def run_fxlms(
             with np.errstate(over="ignore", invalid="ignore"):
                 controller.update(
                     filtered_reference_vector=filtered_history,
-                    error=residual_sample,
+                    error=measured_error_sample,
                 )
         except FloatingPointError:
             weights[n] = weights_before_update
@@ -292,6 +329,8 @@ def run_fxlms(
         control=control,
         anti_noise=anti_noise,
         residual=residual,
+        measurement_noise=measurement_noise,
+        measured_error=measured_error,
         filtered_reference=filtered_reference,
         weights=weights,
         status=status,
