@@ -9,6 +9,7 @@ Signal convention (see docs/algorithm_specification.md):
     e_m[n] = r[n] + v[n]        measured error, seen by the controller
 """
 from __future__ import annotations
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -18,6 +19,72 @@ from anc.metrics import rms
 # generated from the same seed. Never change once results are published.
 _NOISE_STREAM_ID = 7_001
 
+
+@dataclass(frozen=True)
+class FloorReport:
+    """True vs measured attenuation over one evaluation window."""
+
+    true_attenuation_db: float
+    measured_attenuation_db: float
+    floor_db: float
+    floor_limited: bool
+
+
+def floor_report(
+    disturbance: np.ndarray,
+    residual: np.ndarray,
+    noise: np.ndarray,
+    start_sample: int = 0,
+    stop_sample: int | None = None,
+    margin_db: float = 3.0,
+) -> FloorReport:
+    """Compare true and measured attenuation over [start_sample, stop_sample).
+
+    disturbance: d[n], the uncontrolled signal at the error sensor.
+    residual:    the noise-free residual (FxLMS trace.residual,
+                 LMS trace.error).
+    noise:       v[n], the measurement noise used in the run.
+
+    true      = 20*log10(RMS(d)     / RMS(r))       (simulation-only)
+    measured  = 20*log10(RMS(d + v) / RMS(r + v))   (what a sensor reports)
+    """
+    d = np.asarray(disturbance, dtype=np.float64)
+    r = np.asarray(residual, dtype=np.float64)
+    v = np.asarray(noise, dtype=np.float64)
+
+    if not (d.shape == r.shape == v.shape) or d.ndim != 1:
+        raise ValueError("disturbance, residual and noise must be equal-length 1-D arrays.")
+
+    if stop_sample is None:
+        stop_sample = d.size
+
+    if not 0 <= start_sample < stop_sample <= d.size:
+        raise ValueError("Invalid evaluation window.")
+
+    window = slice(start_sample, stop_sample)
+    d, r, v = d[window], r[window], v[window]
+
+    if not (np.isfinite(d).all() and np.isfinite(r).all() and np.isfinite(v).all()):
+        raise ValueError("Signals must be finite inside the evaluation window.")
+
+    true_db = _ratio_db(rms(d), rms(r))
+    measured_db = _ratio_db(rms(d + v), rms(r + v))
+    floor_db = measurement_floor_db(d, v)
+
+    return FloorReport(
+        true_attenuation_db=true_db,
+        measured_attenuation_db=measured_db,
+        floor_db=floor_db,
+        floor_limited=is_floor_limited(measured_db, floor_db, margin_db),
+    )
+
+
+def _ratio_db(before_rms: float, after_rms: float) -> float:
+    if before_rms == 0.0:
+        raise ValueError("Disturbance RMS is zero; attenuation is undefined.")
+    if after_rms == 0.0:
+        return float("inf")
+    return float(20.0 * np.log10(before_rms / after_rms))
 
 def noise_std_for_snr(disturbance: np.ndarray, snr_db: float) -> float:
     """Noise standard deviation giving SNR_dB = 20*log10(RMS(d) / RMS(v))."""
