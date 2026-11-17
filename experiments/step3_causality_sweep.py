@@ -14,6 +14,7 @@ from anc.fxlms import run_fxlms
 from anc.metrics import attenuation_db, rms
 from anc.plant import ANCPlant
 from anc.signals import generate_tone_mixture
+from anc.measurement import floor_report, make_measurement_noise
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -126,6 +127,10 @@ def main() -> None:
     controller_cfg = config["controller"]
     evaluation_cfg = config["evaluation"]
     safety_cfg = config.get("safety", {})
+    noise_cfg = config.get("measurement_noise") or {}
+    snr_db = noise_cfg.get("snr_db")
+    snr_db = None if snr_db is None else float(snr_db)
+    floor_margin_db = float(noise_cfg.get("floor_margin_db", 3.0))
     output_cfg = config["output"]
 
     sample_rate_hz = int(signal_cfg["sample_rate_hz"])
@@ -185,6 +190,15 @@ def main() -> None:
 
     rows: list[dict] = []
 
+    convergence_kwargs = dict(
+        sample_rate_hz=sample_rate_hz,
+        start_sample=start_sample,
+        block_duration_s=float(evaluation_cfg.get("block_duration_s", 0.1)),
+        steady_state_fraction=float(evaluation_cfg.get("steady_state_fraction", 0.2)),
+        tolerance_db=float(evaluation_cfg.get("convergence_tolerance_db", 1.0)),
+        consecutive_blocks=int(evaluation_cfg.get("consecutive_blocks", 3)),
+    )
+    
     # Generate each reference once, then reuse it for every delay
     # condition belonging to that seed.
     for seed in seeds:
@@ -227,17 +241,29 @@ def main() -> None:
                 ),
             )
 
+            # Size the sensor noise against THIS run's disturbance
+            # (the primary path differs per delay condition).
+            primary_noise = plant.primary_output(reference)
+            measurement_noise = make_measurement_noise(
+                primary_noise, snr_db, seed=seed
+            )
+
             trace = run_fxlms(
                 reference=reference,
                 plant=plant,
                 controller=controller,
-                max_weight_norm=safety_cfg.get(
-                    "max_weight_norm", 1e6
-                ),
-                max_abs_residual=safety_cfg.get(
-                    "max_abs_residual", 1e6
-                ),
+                max_weight_norm=safety_cfg.get("max_weight_norm", 1e6),
+                max_abs_residual=safety_cfg.get("max_abs_residual", 1e6),
+                measurement_noise=measurement_noise,
             )
+
+            # Guard: a configured SNR must produce non-zero sensor noise.
+            if snr_db is not None and not np.any(trace.measurement_noise):
+                raise RuntimeError(
+                    "measurement_noise.snr_db is set, but the run used "
+                    "zero measurement noise. Is measurement_noise passed "
+                    "to run_fxlms?"
+                )
 
             evaluation_primary_rms = None
             evaluation_residual_rms = None
@@ -245,6 +271,12 @@ def main() -> None:
             steady_primary_rms = None
             steady_residual_rms = None
             steady_attenuation = None
+            evaluation_measured_attenuation = None
+            evaluation_floor_limited = None
+            steady_measured_attenuation = None
+            steady_floor_limited = None
+            measurement_floor = None
+            measured_convergence_time = None
 
             convergence_time = None
             convergence_status = "unavailable"
@@ -278,28 +310,7 @@ def main() -> None:
                 convergence = analyze_convergence(
                     primary_noise=primary_valid,
                     residual=residual_valid,
-                    sample_rate_hz=sample_rate_hz,
-                    start_sample=start_sample,
-                    block_duration_s=float(
-                        evaluation_cfg.get(
-                            "block_duration_s", 0.1
-                        )
-                    ),
-                    steady_state_fraction=float(
-                        evaluation_cfg.get(
-                            "steady_state_fraction", 0.2
-                        )
-                    ),
-                    tolerance_db=float(
-                        evaluation_cfg.get(
-                            "convergence_tolerance_db", 1.0
-                        )
-                    ),
-                    consecutive_blocks=int(
-                        evaluation_cfg.get(
-                            "consecutive_blocks", 3
-                        )
-                    ),
+                    **convergence_kwargs,
                 )
 
                 steady_primary_rms = (
@@ -311,6 +322,35 @@ def main() -> None:
                 steady_attenuation = (
                     convergence.steady_state_attenuation_db
                 )
+
+                evaluation_report = floor_report(
+                    trace.primary_noise,
+                    trace.residual,
+                    trace.measurement_noise,
+                    start_sample=start_sample,
+                    margin_db=floor_margin_db,
+                )
+                steady_report = floor_report(
+                    trace.primary_noise,
+                    trace.residual,
+                    trace.measurement_noise,
+                    start_sample=convergence.steady_state_start_sample,
+                    margin_db=floor_margin_db,
+                )
+
+                # Convergence as a real system would see it (Lesson 5.2).
+                measured_convergence = analyze_convergence(
+                    primary_noise=trace.primary_noise + trace.measurement_noise,
+                    residual=trace.measured_error,
+                    **convergence_kwargs,
+                )
+
+                evaluation_measured_attenuation = evaluation_report.measured_attenuation_db
+                evaluation_floor_limited = evaluation_report.floor_limited
+                steady_measured_attenuation = steady_report.measured_attenuation_db
+                steady_floor_limited = steady_report.floor_limited
+                measurement_floor = steady_report.floor_db
+                measured_convergence_time = measured_convergence.convergence_time_s
 
                 # Convergence time is intentionally not used as
                 # the primary result of this causality experiment.
@@ -340,6 +380,13 @@ def main() -> None:
                 "steady_state_primary_rms": steady_primary_rms,
                 "steady_state_residual_rms": steady_residual_rms,
                 "steady_state_attenuation_db": steady_attenuation,
+                "measurement_snr_db": snr_db,
+                "measurement_floor_db": measurement_floor,
+                "evaluation_measured_attenuation_db": evaluation_measured_attenuation,
+                "evaluation_floor_limited": evaluation_floor_limited,
+                "steady_state_measured_attenuation_db": steady_measured_attenuation,
+                "steady_state_floor_limited": steady_floor_limited,
+                "measured_convergence_time_s": measured_convergence_time,
             }
 
             rows.append(row)
@@ -395,6 +442,15 @@ def main() -> None:
         f"Physical secondary delay: {physical_secondary_delay} samples",
         f"Processing delay: {processing_delay} samples",
         f"Effective secondary delay: {effective_secondary_delay} samples",
+        (
+            "Measurement noise: none (idealised sensor). Attenuation is not "
+            "bounded by a sensor floor; very high values reflect numerical "
+            "precision, not achievable acoustic performance."
+            if snr_db is None else
+            f"Measurement noise: SNR {snr_db:g} dB re. the uncontrolled "
+            f"disturbance. Measured values within {floor_margin_db:g} dB of "
+            f"the floor are marked floor-limited."
+        ),
         "",
         "Results by causality margin:",
     ]
@@ -422,6 +478,11 @@ def main() -> None:
             "steady_state_attenuation_db",
         )
 
+        mean_meas, std_meas, count_meas = metric_statistics(
+            rows, margin, "steady_state_measured_attenuation_db",
+        )
+        n_limited = sum(row["steady_state_floor_limited"] is True for row in group)
+
         summary_lines.extend([
             f"Margin: {margin:+d} samples",
             f"  Completed runs: {completed}/{len(group)}",
@@ -435,6 +496,11 @@ def main() -> None:
             f"(n={count_steady})"
             if count_steady else
             "  Steady-state attenuation: unavailable",
+            f"  Steady-state measured attenuation: "
+            f"{mean_meas:.2f} +/- {std_meas:.2f} dB (n={count_meas}), "
+            f"floor-limited in {n_limited}/{len(group)} runs"
+            if count_meas else
+            "  Steady-state measured attenuation: unavailable",
             "",
         ])
 
@@ -513,7 +579,7 @@ def main() -> None:
         fig.tight_layout()
 
         figure_path = (
-            figure_dir / "step3_causality_sweep.png"
+            figure_dir / f"{experiment_cfg['name']}.png"
         )
         fig.savefig(
             figure_path,

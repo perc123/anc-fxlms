@@ -33,3 +33,7 @@ output:
   directory: results/step3_causality_sweep
   figure_directory: docs/figures
   save_figures: true
+
+measurement_noise:
+  snr_db: null          # null = idealised noise-free sensor
+  floor_margin_db: 3.0
