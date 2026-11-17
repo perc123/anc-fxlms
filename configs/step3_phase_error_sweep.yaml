@@ -35,6 +35,10 @@ plant:
   secondary_taps: [0.70, 0.00, 0.20, 0.00, -0.05]
   secondary_delay_samples: 8
 
+measurement_noise:
+  snr_db: null          # null = idealised noise-free sensor
+  floor_margin_db: 3.0
+
 controller:
   length: 32
   step_size: 0.005

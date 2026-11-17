@@ -13,13 +13,17 @@ from anc.controllers import FxLMSController
 from anc.fxlms import run_fxlms
 from anc.metrics import attenuation_db
 from anc.plant import ANCPlant
+from anc.measurement import floor_report, make_measurement_noise
+from plotting import draw_measurement_floor, mean_finite_floor
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 DISPLAY_CEILING_DB = 60.0
-
+    # Display ceiling only. The simulation is noiseless with a
+    # deterministic tone, so the residual can become arbitrarily small;
+    # values above the ceiling are not physical ANC performance.
 
 def resolve_path(path_string: str) -> Path:
     path = Path(path_string)
@@ -163,6 +167,11 @@ def main() -> None:
     safety_cfg = config.get("safety", {})
     output_cfg = config["output"]
 
+    noise_cfg = config.get("measurement_noise") or {}
+    snr_db = noise_cfg.get("snr_db")
+    snr_db = None if snr_db is None else float(snr_db)
+    floor_margin_db = float(noise_cfg.get("floor_margin_db", 3.0))
+
     sample_rate_hz = int(signal_cfg["sample_rate_hz"])
     duration_s = float(signal_cfg["duration_s"])
     frequency_hz = float(signal_cfg["frequency_hz"])
@@ -279,6 +288,14 @@ def main() -> None:
             white_noise_std=white_noise_std,
         )
 
+        # The plant is identical for every phase-error condition, so the
+        # disturbance and the sensor noise are generated once per seed
+        # (common random numbers across conditions).
+        primary_noise = plant.primary_output(reference)
+        measurement_noise = make_measurement_noise(
+            primary_noise, snr_db, seed=seed
+        )
+
         for estimated_delay in estimated_delays:
             phase_error = phase_error_degrees(
                 frequency_hz=frequency_hz,
@@ -304,11 +321,25 @@ def main() -> None:
                 max_abs_residual=safety_cfg.get(
                     "max_abs_residual", 1e6
                 ),
+                measurement_noise=measurement_noise,
             )
+
+            # Guard: a configured SNR must produce non-zero sensor noise.
+            if snr_db is not None and not np.any(trace.measurement_noise):
+                raise RuntimeError(
+                    "measurement_noise.snr_db is set, but the run used "
+                    "zero measurement noise. Is measurement_noise passed "
+                    "to run_fxlms?"
+                )
 
             evaluation_attenuation = None
             steady_state_attenuation = None
             steady_state_residual_rms = None
+            measurement_floor = None
+            evaluation_measured_attenuation = None
+            evaluation_floor_limited = None
+            steady_measured_attenuation = None
+            steady_floor_limited = None
 
             # Evaluate attenuation only for complete runs.
             if (
@@ -342,6 +373,33 @@ def main() -> None:
                 steady_state_residual_rms = (
                     convergence_metrics.steady_state_residual_rms
                 )
+
+                evaluation_report = floor_report(
+                    trace.primary_noise,
+                    trace.residual,
+                    trace.measurement_noise,
+                    start_sample=start_sample,
+                    margin_db=floor_margin_db,
+                )
+                steady_report = floor_report(
+                    trace.primary_noise,
+                    trace.residual,
+                    trace.measurement_noise,
+                    start_sample=(
+                        convergence_metrics.steady_state_start_sample
+                    ),
+                    margin_db=floor_margin_db,
+                )
+
+                measurement_floor = evaluation_report.floor_db
+                evaluation_measured_attenuation = (
+                    evaluation_report.measured_attenuation_db
+                )
+                evaluation_floor_limited = evaluation_report.floor_limited
+                steady_measured_attenuation = (
+                    steady_report.measured_attenuation_db
+                )
+                steady_floor_limited = steady_report.floor_limited
 
             valid_weights = trace.weights[
                 :trace.processed_samples
@@ -387,6 +445,16 @@ def main() -> None:
                 "steady_state_attenuation_db": (
                     steady_state_attenuation
                 ),
+                                "measurement_snr_db": snr_db,
+                "measurement_floor_db": measurement_floor,
+                "evaluation_measured_attenuation_db": (
+                    evaluation_measured_attenuation
+                ),
+                "evaluation_floor_limited": evaluation_floor_limited,
+                "steady_state_measured_attenuation_db": (
+                    steady_measured_attenuation
+                ),
+                "steady_state_floor_limited": steady_floor_limited,
             }
 
             rows.append(row)
@@ -452,6 +520,15 @@ def main() -> None:
         f"Primary delay: {primary_delay} samples",
         f"Causality margin: {causality_margin} samples",
         f"Seeds: {seeds}",
+        (
+            "Measurement noise: none (idealised sensor). Attenuation is not "
+            "bounded by a sensor floor; very high values reflect numerical "
+            "precision, not achievable acoustic performance."
+            if snr_db is None else
+            f"Measurement noise: SNR {snr_db:g} dB re. the uncontrolled "
+            f"disturbance. Measured values within {floor_margin_db:g} dB of "
+            f"the floor are marked floor-limited."
+        ),
         "",
         "Results by secondary-path phase error:",
     ]
@@ -486,6 +563,15 @@ def main() -> None:
             "steady_state_attenuation_db",
         )
 
+        mean_meas, std_meas, count_meas = metric_statistics(
+            rows,
+            phase_error,
+            "steady_state_measured_attenuation_db",
+        )
+        n_limited = sum(
+            row["steady_state_floor_limited"] is True for row in group
+        )
+
         summary_lines.extend([
             f"Phase error: {phase_error:+.2f} degrees",
             f"  Completed runs: {completed}/{len(group)}",
@@ -503,6 +589,13 @@ def main() -> None:
                 f"(n={count_steady})"
                 if count_steady else
                 "  Steady-state attenuation: unavailable"
+            ),
+            (
+                f"  Steady-state measured attenuation: "
+                f"{mean_meas:.2f} +/- {std_meas:.2f} dB (n={count_meas}), "
+                f"floor-limited in {n_limited}/{len(group)} runs"
+                if count_meas else
+                "  Steady-state measured attenuation: unavailable"
             ),
             "",
         ])
@@ -526,6 +619,9 @@ def main() -> None:
 
         means = []
         stds = []
+        meas_means = []
+        meas_stds = []
+        meas_all_limited = []
         divergence_fractions = []
 
         for phase_error in phase_errors:
@@ -537,6 +633,13 @@ def main() -> None:
 
             means.append(mean if count else np.nan)
             stds.append(std if count else 0.0)
+            mean_m, std_m, count_m = metric_statistics(
+                rows,
+                phase_error,
+                "evaluation_measured_attenuation_db",
+            )
+            meas_means.append(mean_m if count_m else np.nan)
+            meas_stds.append(std_m if count_m else 0.0)
 
             group = [
                 row for row in rows
@@ -551,6 +654,17 @@ def main() -> None:
                 / len(group)
             )
 
+            completed_group = [
+                row for row in group if row["status"] == "completed"
+            ]
+            meas_all_limited.append(
+                bool(completed_group)
+                and all(
+                    row["evaluation_floor_limited"] is True
+                    for row in completed_group
+                )
+            )
+
         fig, (ax1, ax2) = plt.subplots(
             2,
             1,
@@ -559,33 +673,8 @@ def main() -> None:
             gridspec_kw={"height_ratios": [3, 1]},
         )
 
-        # Display ceiling only. The simulation is noiseless with a
-        # deterministic tone, so the residual can become arbitrarily small;
-        # values above the ceiling are not physical ANC performance.
-        # CSV and summary keep the unclipped measurements.
-        means_arr = np.asarray(means, dtype=np.float64)
-        stds_arr = np.asarray(stds, dtype=np.float64)
-        plot_means = np.minimum(means_arr, DISPLAY_CEILING_DB)
-        plot_upper = np.minimum(
-            means_arr + stds_arr, DISPLAY_CEILING_DB
-        )
-        plot_lower = np.minimum(
-            means_arr - stds_arr, DISPLAY_CEILING_DB
-        )
-        yerr = np.vstack(
-            (plot_means - plot_lower, plot_upper - plot_means)
-        )
-
-        ax1.errorbar(
-            phase_errors,
-            plot_means,
-            yerr=yerr,
-            marker="o",
-            capsize=4,
-            linewidth=1.5,
-            label="Mean evaluation attenuation",
-        )
-
+        # Reference lines first: set_ylim() below switches off y-autoscaling,
+        # so anything drawn after it cannot extend the axis.
         for boundary in (-90.0, 90.0):
             ax1.axvline(
                 boundary,
@@ -601,22 +690,96 @@ def main() -> None:
             linewidth=1.0,
         )
 
-        ax1.axhline(
-            DISPLAY_CEILING_DB,
-            color="red",
-            linestyle="-.",
-            linewidth=1.0,
-            label=(
-                f"{DISPLAY_CEILING_DB:g} dB display ceiling "
-                "(visualization limit)"
-            ),
-        )
-        ax1.set_ylim(top=DISPLAY_CEILING_DB * 1.05)
+        means_arr = np.asarray(means, dtype=np.float64)
+        stds_arr = np.asarray(stds, dtype=np.float64)
 
-        ax1.set_ylabel("Evaluation attenuation (dB, clipped for display)")
+        if snr_db is None:
+            # Noise-free: no physical floor exists, and the residual can
+            # become arbitrarily small. Keep the labelled display ceiling.
+            # CSV and summary keep the unclipped measurements.
+            plot_means = np.minimum(means_arr, DISPLAY_CEILING_DB)
+            plot_upper = np.minimum(
+                means_arr + stds_arr, DISPLAY_CEILING_DB
+            )
+            plot_lower = np.minimum(
+                means_arr - stds_arr, DISPLAY_CEILING_DB
+            )
+            yerr = np.vstack(
+                (plot_means - plot_lower, plot_upper - plot_means)
+            )
+
+            ax1.errorbar(
+                phase_errors,
+                plot_means,
+                yerr=yerr,
+                marker="o",
+                capsize=4,
+                linewidth=1.5,
+                label="Mean evaluation attenuation",
+            )
+
+            ax1.axhline(
+                DISPLAY_CEILING_DB,
+                color="red",
+                linestyle="-.",
+                linewidth=1.0,
+                label=(
+                    f"{DISPLAY_CEILING_DB:g} dB display ceiling "
+                    "(visualization limit)"
+                ),
+            )
+            ax1.set_ylim(top=DISPLAY_CEILING_DB * 1.05)
+            draw_measurement_floor(ax1, None)
+            ax1.set_ylabel(
+                "Evaluation attenuation (dB, clipped for display)"
+            )
+        else:
+            # With a sensor floor nothing needs clipping: plot true and
+            # measured values as they are.
+            x = np.asarray(phase_errors, dtype=np.float64)
+            meas_arr = np.asarray(meas_means, dtype=np.float64)
+            limited = np.asarray(meas_all_limited, dtype=bool)
+
+            ax1.errorbar(
+                x,
+                means_arr,
+                yerr=stds_arr,
+                marker="o",
+                capsize=4,
+                linewidth=1.5,
+                label="True evaluation attenuation (simulation-only)",
+            )
+            ax1.errorbar(
+                x,
+                meas_arr,
+                yerr=np.asarray(meas_stds, dtype=np.float64),
+                linestyle="--",
+                marker="none",
+                capsize=4,
+                color="C1",
+                label="Measured evaluation attenuation",
+            )
+            ax1.plot(x[~limited], meas_arr[~limited], "o", color="C1")
+            ax1.plot(
+                x[limited],
+                meas_arr[limited],
+                "o",
+                color="C1",
+                markerfacecolor="white",
+                label="Measured, floor-limited",
+            )
+            draw_measurement_floor(
+                ax1,
+                mean_finite_floor(rows),
+                margin_db=floor_margin_db,
+            )
+            ax1.set_ylabel("Evaluation attenuation (dB)")
+
         ax1.set_title(
             "Narrowband FxLMS performance versus "
-            "secondary-path phase error"
+            "secondary-path phase error\n"
+            + ("Idealised noise-free sensor" if snr_db is None
+               else f"Error-microphone SNR {snr_db:g} dB")
         )
         ax1.legend()
         ax1.grid(True, alpha=0.3)
@@ -639,7 +802,7 @@ def main() -> None:
         fig.tight_layout()
 
         figure_path = (
-            figure_dir / "step3_phase_error_sweep.png"
+            figure_dir / f"{experiment_cfg['name']}.png"
         )
         fig.savefig(
             figure_path,
