@@ -15,6 +15,7 @@ from anc.metrics import attenuation_db, rms
 from anc.plant import ANCPlant
 from anc.signals import generate_tone_mixture
 from anc.measurement import floor_report, make_measurement_noise
+from plotting import draw_measurement_floor, mean_finite_floor
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -589,6 +590,64 @@ def main() -> None:
         plt.close(fig)
 
         figure_paths.append(figure_path)
+
+                # -----------------------------------------------------------
+        # Figure 2: steady-state true vs measured, with the floor.
+        # -----------------------------------------------------------
+        true_m, true_s, meas_m, meas_s, all_limited, ss_margins = [], [], [], [], [], []
+
+        for margin in margins:
+            mean_t, std_t, n_t = metric_statistics(
+                rows, margin, "steady_state_attenuation_db")
+            mean_m, std_m, n_m = metric_statistics(
+                rows, margin, "steady_state_measured_attenuation_db")
+            if not (n_t and n_m):
+                continue
+
+            group = [r for r in rows if r["causality_margin_samples"] == margin]
+            ss_margins.append(margin)
+            true_m.append(mean_t); true_s.append(std_t)
+            meas_m.append(mean_m); meas_s.append(std_m)
+            all_limited.append(
+                all(r["steady_state_floor_limited"] is True for r in group)
+            )
+
+        x = np.asarray(ss_margins)
+        meas = np.asarray(meas_m)
+        limited = np.asarray(all_limited, dtype=bool)
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        ax.errorbar(x, true_m, yerr=true_s, marker="o", capsize=4,
+                    label="True (acoustic, simulation-only)")
+        ax.errorbar(x, meas, yerr=meas_s, linestyle="--", marker="none",
+                    capsize=4, color="C1", label="Measured (error microphone)")
+        # Solid markers: valid measurement. Hollow: floor-limited.
+        ax.plot(x[~limited], meas[~limited], "o", color="C1")
+        ax.plot(x[limited], meas[limited], "o", color="C1",
+                markerfacecolor="white", label="Measured, floor-limited")
+
+        draw_measurement_floor(ax, mean_finite_floor(rows),
+                               margin_db=floor_margin_db)
+
+        ax.axvline(0, color="black", linestyle=":", linewidth=1.0,
+                   label="Causality boundary")
+        ax.set_xticks(margins)
+        ax.set_xlabel("Causality margin: Dp - (Ds + Dc) [samples]")
+        ax.set_ylabel("Steady-state attenuation (dB)")
+        ax.set_title(
+            "FxLMS steady-state attenuation: true vs measured\n"
+            + ("Idealised noise-free sensor" if snr_db is None
+               else f"Error-microphone SNR {snr_db:g} dB")
+        )
+        ax.legend(loc="center right")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+
+        steady_path = figure_dir / f"{experiment_cfg['name']}_steady_state.png"
+        fig.savefig(steady_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        figure_paths.append(steady_path)
 
     print("\nCausality sweep summary:")
     print("\n".join(summary_lines))

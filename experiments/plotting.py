@@ -2,6 +2,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
 
 from anc.controllers import FixedFIRController
 from anc.simulate import SimulationTrace
@@ -449,3 +450,49 @@ def plot_lms_results(
     finish_figure(fig, "step2_lms_weights.png")
 
     return saved_paths
+
+def draw_measurement_floor(
+    ax: Axes,
+    floor_db: float | None,
+    margin_db: float = 3.0,
+    label: bool = True,
+) -> None:
+    """Draw the measurement floor on an attenuation plot.
+
+    floor_db:  mean measurement floor in dB, or None/inf for a noise-free run.
+    margin_db: width of the floor-limited band below the floor.
+
+    Data are never clipped: points above the floor stay where they are.
+    """
+    if floor_db is None or not np.isfinite(floor_db):
+        ax.text(
+            0.99, 0.02,
+            "No measurement floor (idealised noise-free sensor)",
+            transform=ax.transAxes,
+            ha="right", va="bottom",
+            fontsize=8, color="0.35", style="italic",
+        )
+        return
+
+    ax.axhline(
+        floor_db,
+        color="0.25", linestyle="--", linewidth=1.0,
+        label=f"Measurement floor ({floor_db:.1f} dB)" if label else None,
+    )
+    ax.axhspan(
+        floor_db - margin_db, floor_db,
+        color="0.5", alpha=0.15, linewidth=0,
+        label=(f"Floor-limited band (within {margin_db:g} dB)"
+               if label else None),
+    )
+
+
+def mean_finite_floor(
+    rows: list[dict], key: str = "measurement_floor_db"
+) -> float | None:
+    """Mean of the finite floor values in a list of result rows, or None if there are none."""
+    values = [
+        float(row[key]) for row in rows
+        if row.get(key) is not None and np.isfinite(float(row[key]))
+    ]
+    return float(np.mean(values)) if values else None
