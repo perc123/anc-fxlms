@@ -97,7 +97,7 @@ def generate_reference(
     if white_noise_std > 0.0:
         reference += (
             white_noise_std
-            * rng.standatd_normal(n_samples)
+            * rng.standard_normal(n_samples)
         )
 
     return reference
@@ -460,7 +460,7 @@ def main() -> None:
         group = [
             row for row in rows
             if np.isclose(
-                row["phase_error_deg"],#
+                row["phase_error_deg"],
                 phase_error,
             )
         ]

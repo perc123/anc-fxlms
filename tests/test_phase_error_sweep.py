@@ -1,5 +1,8 @@
 import pytest
-from experiments.step3_phase_error_sweep import phase_error_degrees
+from experiments.step3_phase_error_sweep import (
+    generate_reference,
+    phase_error_degrees,
+)
 
 
 def test_zero_phase_error_for_matched_delay():
@@ -75,3 +78,16 @@ def test_phase_error_rejects_negative_delay():
             estimated_delay_samples=-1,
             actual_delay_samples=8,
         )
+
+def test_generate_reference_with_white_noise_has_correct_shape():
+    clean = generate_reference(
+        frequency_hz=125.0, amplitude=1.0, sample_rate_hz=2000,
+        duration_s=0.5, seed=0,
+    )
+    noisy = generate_reference(
+        frequency_hz=125.0, amplitude=1.0, sample_rate_hz=2000,
+        duration_s=0.5, seed=0, white_noise_std=0.1,
+    )
+
+    assert noisy.shape == clean.shape == (1000,)
+    assert not (noisy == clean).all()
