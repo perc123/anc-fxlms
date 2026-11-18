@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import csv
 import argparse
+import csv
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -10,6 +10,8 @@ import yaml
 
 from anc.adaptive import run_lms
 from anc.controllers import LMSController
+from anc.measurement import floor_report, make_measurement_noise
+from plotting import draw_measurement_floor, mean_finite_floor
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +36,7 @@ def load_config(config_path: Path) -> dict:
         raise ValueError("Experiment configuration must be a YAML mapping.")
 
     return config
+
 
 def generate_reference(
     sample_count: int,
@@ -105,6 +108,7 @@ def run_one(
     step_size: float,
     max_weight_norm: float,
     max_abs_error: float,
+    measurement_noise: np.ndarray | None = None,
 ):
     controller = LMSController(
         filter_length=filter_length,
@@ -117,6 +121,7 @@ def run_one(
         controller=controller,
         max_weight_norm=max_weight_norm,
         max_abs_error=max_abs_error,
+        measurement_noise=measurement_noise,
     )
 
 
@@ -127,6 +132,8 @@ def make_result_row(
     desired: np.ndarray,
     sample_rate_hz: int,
     transient_samples: int,
+    snr_db: float | None,
+    floor_margin_db: float,
 ) -> dict:
     processed = min(trace.processed_samples, desired.size)
     valid_error = trace.error[:processed]
@@ -139,6 +146,9 @@ def make_result_row(
 
     evaluation_error_rms = None
     evaluation_reduction = None
+    measurement_floor = None
+    evaluation_measured_reduction = None
+    evaluation_floor_limited = None
 
     if trace.status == "completed" and processed > transient_samples:
         evaluation_desired = desired[transient_samples:processed]
@@ -149,6 +159,18 @@ def make_result_row(
             evaluation_desired,
             evaluation_error,
         )
+
+        report = floor_report(
+            desired,
+            trace.error,
+            trace.measurement_noise,
+            start_sample=transient_samples,
+            stop_sample=processed,
+            margin_db=floor_margin_db,
+        )
+        measurement_floor = report.floor_db
+        evaluation_measured_reduction = report.measured_attenuation_db
+        evaluation_floor_limited = report.floor_limited
 
     divergence_time_s = (
         trace.divergence_sample / sample_rate_hz
@@ -168,6 +190,10 @@ def make_result_row(
         "peak_abs_error": peak_abs_error,
         "evaluation_error_rms": evaluation_error_rms,
         "evaluation_error_reduction_db": evaluation_reduction,
+        "measurement_snr_db": snr_db,
+        "measurement_floor_db": measurement_floor,
+        "evaluation_measured_reduction_db": evaluation_measured_reduction,
+        "evaluation_floor_limited": evaluation_floor_limited,
     }
 
 
@@ -205,6 +231,15 @@ def aggregate_results(
             if row["divergence_time_s"] is not None
         ]
 
+        measured_reductions = [
+            row["evaluation_measured_reduction_db"]
+            for row in completed
+            if row["evaluation_measured_reduction_db"] is not None
+        ]
+        floor_limited_runs = sum(
+            row["evaluation_floor_limited"] is True for row in completed
+        )
+
         finite_norms = [
             row["max_weight_norm"]
             for row in matching
@@ -223,6 +258,17 @@ def aggregate_results(
                 "std_evaluation_reduction_db": (
                     float(np.std(reductions)) if reductions else None
                 ),
+                "mean_measured_reduction_db": (
+                    float(np.mean(measured_reductions))
+                    if measured_reductions
+                    else None
+                ),
+                "std_measured_reduction_db": (
+                    float(np.std(measured_reductions))
+                    if measured_reductions
+                    else None
+                ),
+                "floor_limited_runs": floor_limited_runs,
                 "mean_divergence_time_s": (
                     float(np.mean(divergence_times))
                     if divergence_times
@@ -239,7 +285,10 @@ def aggregate_results(
 
 def save_plots(
     summary_rows: list[dict],
+    rows: list[dict],
     figures_dir: Path,
+    snr_db: float | None,
+    floor_margin_db: float,
 ) -> None:
     figures_dir.mkdir(parents=True, exist_ok=True)
 
@@ -293,12 +342,61 @@ def save_plots(
             yerr=stds,
             marker="o",
             capsize=4,
+            label="True reduction (simulation-only)",
         )
+
+        if snr_db is not None:
+            measured = np.array(
+                [row["mean_measured_reduction_db"] for row in valid_rows],
+                dtype=np.float64,
+            )
+            measured_stds = np.array(
+                [row["std_measured_reduction_db"] for row in valid_rows],
+                dtype=np.float64,
+            )
+            limited = np.array(
+                [
+                    row["floor_limited_runs"] == row["completed_runs"]
+                    for row in valid_rows
+                ],
+                dtype=bool,
+            )
+
+            ax.errorbar(
+                x,
+                measured,
+                yerr=measured_stds,
+                linestyle="--",
+                marker="none",
+                capsize=4,
+                color="C1",
+                label="Measured reduction",
+            )
+            ax.plot(x[~limited], measured[~limited], "o", color="C1")
+            ax.plot(
+                x[limited],
+                measured[limited],
+                "o",
+                color="C1",
+                markerfacecolor="white",
+                label="Measured, floor-limited",
+            )
+
+    draw_measurement_floor(
+        ax,
+        mean_finite_floor(rows),
+        margin_db=floor_margin_db,
+    )
 
     ax.set_xscale("log")
     ax.set_xlabel("LMS step size (μ)")
     ax.set_ylabel("Prediction-error reduction (dB)")
-    ax.set_title("LMS prediction performance for completed runs")
+    ax.set_title(
+        "LMS prediction performance for completed runs\n"
+        + ("Idealised noise-free observation" if snr_db is None
+           else f"Observation SNR {snr_db:g} dB")
+    )
+    ax.legend()
     ax.grid(True, which="both", alpha=0.3)
     fig.tight_layout()
 
@@ -324,6 +422,8 @@ def save_summary(
     path: Path,
     config: dict,
     summary_rows: list[dict],
+    snr_db: float | None,
+    floor_margin_db: float,
 ) -> None:
     experiment = config["experiment"]
     controller = config["controller"]
@@ -344,19 +444,39 @@ def save_summary(
         file.write(
             "A completed run processed the full signal without crossing "
             "either configured safety limit. Completion does not, by itself, "
-            "guarantee good prediction performance.\n\n"
+            "guarantee good prediction performance. Mean reductions are "
+            "averaged over completed runs only (survivor-only).\n\n"
         )
+
+        if snr_db is None:
+            file.write(
+                "Measurement noise: none (idealised observation). Reductions "
+                "are not bounded by a sensor floor; very high values reflect "
+                "numerical precision, not achievable performance.\n\n"
+            )
+        else:
+            file.write(
+                f"Measurement noise: SNR {snr_db:g} dB re. the desired "
+                f"signal. Measured values within {floor_margin_db:g} dB of "
+                f"the floor are marked floor-limited.\n\n"
+            )
 
         file.write(
             "μ | Completed | Diverged | Completion | "
-            "Mean reduction (dB) | Mean divergence time (s)\n"
+            "Mean reduction (dB) | Measured (dB) | Floor-limited | "
+            "Mean divergence time (s)\n"
         )
-        file.write("-" * 95 + "\n")
+        file.write("-" * 120 + "\n")
 
         for row in summary_rows:
             reduction = row["mean_evaluation_reduction_db"]
             reduction_text = (
                 f"{reduction:.4f}" if reduction is not None else "N/A"
+            )
+
+            measured = row["mean_measured_reduction_db"]
+            measured_text = (
+                f"{measured:.4f}" if measured is not None else "N/A"
             )
 
             divergence_time = row["mean_divergence_time_s"]
@@ -372,6 +492,8 @@ def save_summary(
                 f"{row['diverged_runs']} | "
                 f"{row['completion_fraction']:.2f} | "
                 f"{reduction_text} | "
+                f"{measured_text} | "
+                f"{row['floor_limited_runs']}/{row['completed_runs']} | "
                 f"{time_text}\n"
             )
 
@@ -414,6 +536,11 @@ def main() -> None:
         dtype=np.float64,
     )
 
+    noise_cfg = config.get("measurement_noise") or {}
+    snr_db = noise_cfg.get("snr_db")
+    snr_db = None if snr_db is None else float(snr_db)
+    floor_margin_db = float(noise_cfg.get("floor_margin_db", 3.0))
+
     max_weight_norm = float(config["safety"]["max_weight_norm"])
     max_abs_error = float(config["safety"]["max_abs_error"])
 
@@ -446,6 +573,7 @@ def main() -> None:
     print(f"Filter length: {filter_length} taps")
     print(f"Seeds: {seeds}")
     print(f"Step sizes: {step_sizes}")
+    print(f"Measurement SNR: {'none' if snr_db is None else f'{snr_db:g} dB'}")
     print()
 
     for seed in seeds:
@@ -456,6 +584,12 @@ def main() -> None:
         )
         desired = apply_primary_path(reference, primary_taps)
 
+        # One noise realisation per seed, shared by every step size
+        # (common random numbers across conditions).
+        measurement_noise = make_measurement_noise(
+            desired, snr_db, seed=seed
+        )
+
         for step_size in step_sizes:
             trace = run_one(
                 reference=reference,
@@ -464,7 +598,16 @@ def main() -> None:
                 step_size=step_size,
                 max_weight_norm=max_weight_norm,
                 max_abs_error=max_abs_error,
+                measurement_noise=measurement_noise,
             )
+
+            # Guard: a configured SNR must produce non-zero noise.
+            if snr_db is not None and not np.any(trace.measurement_noise):
+                raise RuntimeError(
+                    "measurement_noise.snr_db is set, but the run used "
+                    "zero measurement noise. Is measurement_noise passed "
+                    "to run_lms?"
+                )
 
             row = make_result_row(
                 seed=seed,
@@ -473,6 +616,8 @@ def main() -> None:
                 desired=desired,
                 sample_rate_hz=sample_rate_hz,
                 transient_samples=transient_samples,
+                snr_db=snr_db,
+                floor_margin_db=floor_margin_db,
             )
             rows.append(row)
 
@@ -505,8 +650,8 @@ def main() -> None:
 
     save_csv(per_seed_path, rows)
     save_csv(summary_csv_path, summary_rows)
-    save_summary(summary_path, config, summary_rows)
-    save_plots(summary_rows, figures_dir)
+    save_summary(summary_path, config, summary_rows, snr_db, floor_margin_db)
+    save_plots(summary_rows, rows, figures_dir, snr_db, floor_margin_db)
 
     print("\nSweep summary")
     print("-------------")
