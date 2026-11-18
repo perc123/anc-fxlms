@@ -1,5 +1,5 @@
 experiment:
-  name: step2_lms_step_size_sweep_coarse_snr60S
+  name: step2_lms_step_size_sweep_coarse_snr60
   sample_rate_hz: 2000
   duration_s: 4.0
   seeds: [42, 43, 44, 45, 46]
@@ -13,20 +13,19 @@ plant:
 controller:
   filter_length: 32
   step_sizes:
+    - 0.001
+    - 0.002
+    - 0.005
+    - 0.01
+    - 0.02
+    - 0.05
+    - 0.10
+    - 0.15
     - 0.20
-    - 0.205
-    - 0.21
-    - 0.215
-    - 0.22
-    - 0.225
     - 0.23
-    - 0.235
-    - 0.24
-    - 0.245
-    - 0.25
 
 measurement_noise:
-  snr_db: 60
+  snr_db: 60.0
   floor_margin_db: 3.0
   
 safety:

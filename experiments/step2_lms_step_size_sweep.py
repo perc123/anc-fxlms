@@ -517,6 +517,14 @@ def main() -> None:
     experiment_name = str(
         config["experiment"].get("name", "step2_lms_step_size_sweep")
     )
+
+    config_path = resolve_path(args.config)
+    if experiment_name != config_path.stem:
+        raise ValueError(
+            f"experiment.name '{experiment_name}' does not match the config "
+            f"file name '{config_path.stem}'. Results would be written to "
+            f"the wrong folder."
+        )
     results_dir = PROJECT_ROOT / "results" / experiment_name
     figures_dir = PROJECT_ROOT / "docs" / "figures" / experiment_name
 
