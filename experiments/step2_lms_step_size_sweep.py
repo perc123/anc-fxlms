@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -12,20 +13,27 @@ from anc.controllers import LMSController
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CONFIG_PATH = PROJECT_ROOT / "configs" / "step2_lms_step_size_sweep.yaml"
-RESULTS_DIR = PROJECT_ROOT / "results" / "step2_lms_step_size_sweep"
-FIGURES_DIR = PROJECT_ROOT / "docs" / "figures" / "step2_lms_step_size_sweep"
+DEFAULT_CONFIG = "configs/step2_lms_step_size_sweep.yaml"
 
 
-def load_config() -> dict:
-    with CONFIG_PATH.open("r", encoding="utf-8") as file:
+def resolve_path(path_string: str) -> Path:
+    path = Path(path_string)
+    if path.is_absolute():
+        return path
+    return PROJECT_ROOT / path
+
+
+def load_config(config_path: Path) -> dict:
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+    with config_path.open("r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
 
     if not isinstance(config, dict):
         raise ValueError("Experiment configuration must be a YAML mapping.")
 
     return config
-
 
 def generate_reference(
     sample_count: int,
@@ -229,8 +237,11 @@ def aggregate_results(
     return summary_rows
 
 
-def save_plots(summary_rows: list[dict]) -> None:
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+def save_plots(
+    summary_rows: list[dict],
+    figures_dir: Path,
+) -> None:
+    figures_dir.mkdir(parents=True, exist_ok=True)
 
     step_sizes = np.array(
         [row["step_size"] for row in summary_rows],
@@ -251,7 +262,7 @@ def save_plots(summary_rows: list[dict]) -> None:
     ax.grid(True, which="both", alpha=0.3)
     fig.tight_layout()
 
-    completion_path = FIGURES_DIR / "step2_lms_completion_rate.png"
+    completion_path = figures_dir / "step2_lms_completion_rate.png"
     fig.savefig(completion_path, dpi=150)
     plt.close(fig)
 
@@ -291,7 +302,7 @@ def save_plots(summary_rows: list[dict]) -> None:
     ax.grid(True, which="both", alpha=0.3)
     fig.tight_layout()
 
-    performance_path = FIGURES_DIR / "step2_lms_prediction_performance.png"
+    performance_path = figures_dir / "step2_lms_prediction_performance.png"
     fig.savefig(performance_path, dpi=150)
     plt.close(fig)
 
@@ -366,7 +377,26 @@ def save_summary(
 
 
 def main() -> None:
-    config = load_config()
+    parser = argparse.ArgumentParser(
+        description="Sweep the LMS step size over several seeds."
+    )
+    parser.add_argument(
+        "--config",
+        default=DEFAULT_CONFIG,
+        help="Path to the step-size sweep YAML configuration.",
+    )
+    args = parser.parse_args()
+
+    config = load_config(resolve_path(args.config))
+
+    # Output locations follow the experiment name, so every config
+    # writes to its own folders. The default name reproduces the
+    # original paths exactly.
+    experiment_name = str(
+        config["experiment"].get("name", "step2_lms_step_size_sweep")
+    )
+    results_dir = PROJECT_ROOT / "results" / experiment_name
+    figures_dir = PROJECT_ROOT / "docs" / "figures" / experiment_name
 
     sample_rate_hz = int(config["experiment"]["sample_rate_hz"])
     duration_s = float(config["experiment"]["duration_s"])
@@ -405,12 +435,12 @@ def main() -> None:
     if sample_count <= transient_samples:
         raise ValueError("Evaluation transient must be shorter than the run.")
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir.mkdir(parents=True, exist_ok=True)
 
     rows = []
 
-    print("Experiment: step2_lms_step_size_sweep")
+    print(f"Experiment: {experiment_name}")
     print(f"Sample rate: {sample_rate_hz} Hz")
     print(f"Duration: {duration_s:.2f} s")
     print(f"Filter length: {filter_length} taps")
@@ -469,14 +499,14 @@ def main() -> None:
         seed_count=len(seeds),
     )
 
-    per_seed_path = RESULTS_DIR / "per_seed_results.csv"
-    summary_csv_path = RESULTS_DIR / "step_size_summary.csv"
-    summary_path = RESULTS_DIR / "summary.txt"
+    per_seed_path = results_dir / "per_seed_results.csv"
+    summary_csv_path = results_dir / "step_size_summary.csv"
+    summary_path = results_dir / "summary.txt"
 
     save_csv(per_seed_path, rows)
     save_csv(summary_csv_path, summary_rows)
     save_summary(summary_path, config, summary_rows)
-    save_plots(summary_rows)
+    save_plots(summary_rows, figures_dir)
 
     print("\nSweep summary")
     print("-------------")
