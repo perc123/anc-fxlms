@@ -87,6 +87,13 @@ path that generates the desired signal.
 
 ## Results
 
+**A note on the attenuation figures.** Early simulations used an idealised,
+noise-free error sensor and reported values up to 255 dB. With a modelled
+60 dB sensor SNR, measured steady-state attenuation is about 60 dB (floor-limited), while the
+true acoustic residual lies about 73 dB below the disturbance. See
+[docs/results.md](docs/results.md#measurement-floor-true-vs-measured-attenuation)
+for the model, the revised conclusions and the limitations.
+
 All results use a 2 kHz sample rate and a 4-second mixture of 80, 120 and
 160 Hz tones plus white noise (std 0.03), a 32-tap controller, and a 0.5 s
 transient excluded from the evaluation.
