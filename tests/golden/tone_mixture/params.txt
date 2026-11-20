@@ -1,0 +1,12 @@
+format_version=1
+name=tone_mixture
+description=Three tones plus light broadband noise; mismatched S_hat.
+n_samples=8000
+filter_length=32
+step_size=0.005
+s_hat_taps=0.66,0.0,0.23,0.0,-0.03
+s_hat_delay=2
+snr_db=none
+seed=42
+y_tolerance=5.34719306533038e-06
+w_tolerance=3.0665885127900694e-06

@@ -1,0 +1,12 @@
+format_version=1
+name=tone_mixture_snr40
+description=As tone_mixture, with 40 dB error-microphone noise in e[n].
+n_samples=8000
+filter_length=32
+step_size=0.005
+s_hat_taps=0.66,0.0,0.23,0.0,-0.03
+s_hat_delay=2
+snr_db=40.0
+seed=42
+y_tolerance=8.457812820439337e-06
+w_tolerance=2.0686489224930327e-06

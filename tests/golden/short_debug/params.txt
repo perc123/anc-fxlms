@@ -1,0 +1,12 @@
+format_version=1
+name=short_debug
+description=Tiny case for reading by hand: L=4, 16 samples, one tone.
+n_samples=16
+filter_length=4
+step_size=0.05
+s_hat_taps=0.7,0.2
+s_hat_delay=1
+snr_db=none
+seed=1
+y_tolerance=1.1288923995600442e-07
+w_tolerance=1e-07
