@@ -26,6 +26,8 @@ The batch harness computes y[n], then e[n], then updates, so its y[n] uses
 weights adapted through e[n-1]; here y[n] also uses the update from e[n]. The
 stability behaviour is the same, and only this module matches the C++
 implementation sample for sample.
+
+See docs/algorithm_specification.md, section 5.2.
 """
 
 import numpy as np

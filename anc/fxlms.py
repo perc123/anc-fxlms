@@ -80,6 +80,8 @@ def run_fxlms(
             Error-microphone noise v[n], same shape as reference.
             None means a noise-free sensor (identical to v[n] = 0).
 
+            
+        See docs/algorithm_specification.md, section 5.1.
     """
 
     _validate_limit("max_weight_norm", max_weight_norm)

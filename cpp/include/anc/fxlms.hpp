@@ -16,6 +16,7 @@ namespace anc {
 //   2. updates the weights with e[n] against the history ending at x'[n],
 //   3. returns y[n] = w . x_hist.
 // The plant model is not part of this class.
+// Specification: docs/algorithm_specification.md, section 5.2.
 class FxLMS {
 public:
     FxLMS(std::size_t filter_length,
