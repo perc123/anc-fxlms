@@ -1,13 +1,13 @@
 """Open-loop parity between the Python streaming reference and the C++ port.
 
-Python simulates the closed loop once in float64 and records x[n] and e[n].
-Both implementations are then fed those same recorded sequences, so e does not
-depend on either implementation's own output and float32 rounding differences
-cannot compound through the loop.
+The inputs and expected outputs are frozen golden vectors in tests/golden/
+(see anc/golden.py). Each case was recorded by simulating the closed loop
+once in float64; both implementations are fed the same recorded (x, e), so
+float32 rounding differences cannot compound through the loop.
 
-The tolerance comes from the float32 Python reference: its drift from float64
-is what float32 arithmetic costs on this problem, and the C++ port should not
-be much worse.
+Tolerances are stored with each case. They come from the float32 Python
+reference: its drift from float64 is what float32 arithmetic costs on this
+problem, and the C++ port should not be much worse.
 """
 
 import shutil
@@ -17,22 +17,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from anc.golden import CASES, load
 from anc.plant import ANCPlant
 from anc.signals import generate_tone_mixture
 from anc.streaming import StreamingFxLMS, run_streaming_closed_loop
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "tests" / "data"
-
-FILTER_LENGTH = 32
-STEP_SIZE = 0.005
-S_HAT_TAPS = [0.66, 0.0, 0.23, 0.0, -0.03]
-S_HAT_DELAY = 2
-
-# The C++ error may exceed the float32-vs-float64 drift by this factor.
-DRIFT_MARGIN = 3.0
-# Absolute floor so a lucky near-zero drift cannot make the check brittle.
-ABS_FLOOR = 1e-7
 
 
 @pytest.fixture(scope="module")
@@ -55,42 +45,6 @@ def cli(tmp_path_factory) -> Path:
         pytest.fail(f"C++ build failed:\n{error.stdout}\n{error.stderr}")
 
     return build_dir / "anc_cli"
-
-
-@pytest.fixture(scope="module")
-def recorded_io() -> tuple[np.ndarray, np.ndarray]:
-    reference = generate_tone_mixture(
-        sample_rate_hz=2000,
-        duration_s=4.0,
-        tones=[
-            {"frequency_hz": 80.0, "amplitude": 0.7},
-            {"frequency_hz": 120.0, "amplitude": 0.4},
-            {"frequency_hz": 160.0, "amplitude": 0.2},
-        ],
-        white_noise_std=0.03,
-        seed=42,
-    )
-    plant = ANCPlant(
-        primary_taps=np.array([0.80, 0.0, 0.15, 0.0, -0.08, 0.0, 0.04]),
-        secondary_taps=np.array([0.70, 0.0, 0.20, 0.0, -0.05]),
-        secondary_delay_samples=2,
-    )
-    controller = StreamingFxLMS(
-        FILTER_LENGTH, STEP_SIZE, np.array(S_HAT_TAPS), S_HAT_DELAY,
-    )
-    x, e, _ = run_streaming_closed_loop(reference, plant, controller)
-    return x, e
-
-
-def _run_python(x, e, dtype):
-    controller = StreamingFxLMS(
-        FILTER_LENGTH, STEP_SIZE, np.array(S_HAT_TAPS), S_HAT_DELAY,
-        dtype=dtype,
-    )
-    y = np.array([
-        controller.process(dtype(xn), dtype(en)) for xn, en in zip(x, e)
-    ])
-    return y, controller.weights.astype(np.float64)
 
 
 def test_streaming_closed_loop_attenuates_noise():
@@ -133,44 +87,42 @@ def test_streaming_update_follows_filtered_push():
     assert y == pytest.approx(-0.25 * 2.0 - 0.10 * 1.0)
 
 
-def test_cpp_matches_python_open_loop(cli, recorded_io):
-    x, e = recorded_io
+@pytest.mark.parametrize("name", [case.name for case in CASES])
+def test_cpp_matches_golden_vectors(cli, name, tmp_path):
+    golden = load(name)
+    params = golden.params
 
-    DATA_DIR.mkdir(exist_ok=True)
-    io_path = DATA_DIR / "parity_io.csv"
-    y_path = DATA_DIR / "parity_cpp_y.csv"
-    w_path = DATA_DIR / "parity_cpp_weights.csv"
-    np.savetxt(io_path, np.column_stack([x, e]), delimiter=",", fmt="%.17g")
+    y_path = tmp_path / "y.csv"
+    w_path = tmp_path / "w.csv"
+
+    # The CLI reads headerless "x,e" lines, so feed it a copy without the header.
+    io_path = tmp_path / "io.csv"
+    np.savetxt(io_path, np.column_stack([golden.x, golden.e]),
+               delimiter=",", fmt="%.17g")
 
     subprocess.run(
         [str(cli),
          "--input", str(io_path),
          "--output-y", str(y_path),
          "--output-weights", str(w_path),
-         "--length", str(FILTER_LENGTH),
-         "--mu", str(STEP_SIZE),
-         "--shat", ",".join(str(tap) for tap in S_HAT_TAPS),
-         "--delay", str(S_HAT_DELAY)],
+         "--length", params["filter_length"],
+         "--mu", params["step_size"],
+         "--shat", params["s_hat_taps"],
+         "--delay", params["s_hat_delay"]],
         check=True, capture_output=True, text=True,
     )
-    y_cpp = np.loadtxt(y_path)
-    w_cpp = np.loadtxt(w_path)
+    y_cpp = np.loadtxt(y_path, ndmin=1)
+    w_cpp = np.loadtxt(w_path, ndmin=1)
 
-    y64, w64 = _run_python(x, e, np.float64)
-    y32, w32 = _run_python(x, e, np.float32)
+    assert y_cpp.shape == golden.y64.shape
+    assert w_cpp.shape == golden.w64.shape
 
-    assert y_cpp.shape == y64.shape
-    assert w_cpp.shape == w64.shape
-
-    y_drift = np.max(np.abs(y32 - y64))
-    w_drift = np.max(np.abs(w32 - w64))
-    y_tol = max(DRIFT_MARGIN * y_drift, ABS_FLOOR)
-    w_tol = max(DRIFT_MARGIN * w_drift, ABS_FLOOR)
-
-    assert np.max(np.abs(y_cpp - y64)) <= y_tol
-    assert np.max(np.abs(w_cpp - w64)) <= w_tol
+    assert np.max(np.abs(y_cpp - golden.y64)) <= golden.y_tolerance
+    assert np.max(np.abs(w_cpp - golden.w64)) <= golden.w_tolerance
 
     # float32 vs float32 should agree more tightly than either does with
-    # float64; only summation order differs.
-    assert np.max(np.abs(y_cpp - y32)) <= max(y_drift, ABS_FLOOR)
-    assert np.max(np.abs(w_cpp - w32)) <= max(w_drift, ABS_FLOOR)
+    # float64; only summation order differs. Stored tolerance = 3 x drift.
+    y_drift = golden.y_tolerance / 3.0
+    w_drift = golden.w_tolerance / 3.0
+    assert np.max(np.abs(y_cpp - golden.y32)) <= max(y_drift, 1e-7)
+    assert np.max(np.abs(w_cpp - golden.w32)) <= max(w_drift, 1e-7)
