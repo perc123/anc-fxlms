@@ -108,11 +108,16 @@ def run_streaming_closed_loop(
         reference: FloatArray,
         plant: ANCPlant,
         controller: StreamingFxLMS,
+        measurement_noise: FloatArray | None = None,
 ) -> tuple[FloatArray, FloatArray, FloatArray]:
     """Drive the streaming controller with the plant simulated in Python.
 
     Returns the (x, e, y) sequences. The plant needs at least one sample of
     secondary-path delay, since e[n] may not depend on y[n].
+
+    measurement_noise:
+        Error-microphone noise v[n], added to e[n] before it reaches the
+        controller. None means a noise-free sensor (identical to v[n] = 0).
     """
     if plant.secondary_delay_samples < 1:
         raise ValueError(
@@ -126,6 +131,16 @@ def run_streaming_closed_loop(
     delay = plant.secondary_delay_samples
 
     n_samples = reference.size
+
+    if measurement_noise is None:
+        measurement_noise = np.zeros(n_samples, dtype=np.float64)
+    else:
+        measurement_noise = np.asarray(measurement_noise, dtype=np.float64)
+        if measurement_noise.shape != reference.shape:
+            raise ValueError("Measurement noise must match the reference shape.")
+        if not np.isfinite(measurement_noise).all():
+            raise ValueError("Measurement noise must contain only finite values.")
+            
     error = np.zeros(n_samples, dtype=np.float64)
     control = np.zeros(n_samples, dtype=np.float64)
 
@@ -138,7 +153,7 @@ def run_streaming_closed_loop(
             if index >= 0:
                 anti_noise += tap * control[index]
 
-        error[n] = primary_noise[n] + anti_noise
+        error[n] = primary_noise[n] + anti_noise + measurement_noise[n]
         control[n] = controller.process(reference[n], error[n])
 
     return reference, error, control
