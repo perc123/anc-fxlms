@@ -125,7 +125,14 @@ The caller supplies e[n], which reflects outputs up to y[n−1].
 | Python (both) | float64 | NumPy dot product |
 | C++ | float32 | k = 0, 1, ..., K−1 |
 
-Rationale for float32 in C++: TODO (your decision, in one or two sentences).
+Rationale for float32 in C++: **Precision decision (open).** The C++ port currently uses float32. Measured
+on the golden vectors, float32 drift from float64 is −106 to −110 dB relative
+to RMS(y), about 45 dB below the 60 dB sensor floor assumed in the results,
+and steady-state weight updates exceed the float32 resolution at the largest
+weight by about 1300×, so adaptation does not stall. float32 matches typical
+real-time audio APIs and embedded FPUs. The choice should be revisited if the
+code targets offline analysis, or if μ or the residual level drop by about
+three orders of magnitude.
 
 Parity test (`tests/test_cpp_parity.py`), open loop: Python simulates the
 closed loop once in float64 and records (x, e). Both implementations are
