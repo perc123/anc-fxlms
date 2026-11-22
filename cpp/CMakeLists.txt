@@ -9,7 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-add_library(anc_fxlms src/fxlms.cpp)
+add_library(anc_fxlms src/fxlms.cpp src/history.cpp)
 target_include_directories(anc_fxlms PUBLIC include)
 target_compile_options(anc_fxlms PRIVATE -Wall -Wextra -Wpedantic)
 

@@ -7,29 +7,6 @@
 
 namespace anc {
 
-void FxLMS::History::resize(std::size_t length) {
-    data_.assign(length, 0.0f);
-    newest_ = 0;
-}
-
-void FxLMS::History::clear() {
-    std::fill(data_.begin(), data_.end(), 0.0f);
-    newest_ = 0;
-}
-
-void FxLMS::History::push(float value) {
-    newest_ = (newest_ == 0) ? data_.size() - 1 : newest_ - 1;
-    data_[newest_] = value;
-}
-
-float FxLMS::History::at(std::size_t k) const {
-    std::size_t index = newest_ + k;
-    if (index >= data_.size()) {
-        index -= data_.size();
-    }
-    return data_[index];
-}
-
 FxLMS::FxLMS(std::size_t filter_length,
              float step_size,
              std::vector<float> secondary_taps_estimate,

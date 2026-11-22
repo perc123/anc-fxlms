@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <vector>
 
+#include "anc/history.hpp"
+
 namespace anc {
 
 // Streaming FxLMS controller with its secondary-path estimate S_hat.
@@ -32,19 +34,6 @@ public:
     std::size_t filter_length() const { return filter_length_; }
 
 private:
-    // Fixed-length history; at(k) is the sample pushed k calls ago.
-    class History {
-    public:
-        explicit History(std::size_t length = 0) { resize(length); }
-        void resize(std::size_t length);
-        void clear();
-        void push(float value);
-        float at(std::size_t k) const;
-
-    private:
-        std::vector<float> data_;
-        std::size_t newest_ = 0;
-    };
 
     std::size_t filter_length_;
     float step_size_;
