@@ -31,8 +31,8 @@ TEST_CASE("History is newest-first") {
     h.push(1.0f);
     h.push(2.0f);
     CHECK(h.at(0) == 2.0f);
-    CHECK(h.at(0) == 1.0f);
-    CHECK(h.at(0) == 0.0f); // not yet written: still the zero initial state
+    CHECK(h.at(1) == 1.0f);
+    CHECK(h.at(2) == 0.0f); // not yet written: still the zero initial state
 }
 
 TEST_CASE("History wraps around and drops the older sample") {
@@ -51,6 +51,14 @@ TEST_CASE("History of length 1 holds only the newest sample") {
     h.push(7.0f);
     h.push(8.0f);
     CHECK(h.at(0) == 8.0f);
+}
+
+TEST_CASE("History of length 0 ignores pushes and reads as zero") {
+    anc::History h;   // default length is 0
+    CHECK(h.size() == 0);
+    h.push(1.0f);
+    CHECK(h.size() == 0);
+    CHECK(h.at(0) == 0.0f);
 }
 
 TEST_CASE("History clear restores the zero state") {

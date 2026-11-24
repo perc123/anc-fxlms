@@ -15,11 +15,17 @@ namespace anc
     }
 
     void History::push(float value) {
+        if (data_.empty()) {
+            return;   // a length-0 history stores nothing
+        }
         newest_ = (newest_ == 0) ? data_.size() -1 : newest_ - 1;
         data_[newest_] = value;
     }
 
     float History::at(std::size_t k) const {
+        if (data_.empty()) {
+            return 0.0f;   // nothing stored: reads as the zero initial state
+        }
         std::size_t index = newest_ + k;
         if (index >= data_.size()) {
             index -= data_.size();
