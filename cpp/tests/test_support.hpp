@@ -6,12 +6,15 @@
 // int main() { return anc_test::run_all(); }
 //
 // A failed check reports file, line and expression and the test continues;
-// run_all() returns non-zero if any check failed, whick is what CTest reads
+// run_all() returns non-zero if any check failed, which is what CTest reads.
 
 #include <cmath>
+#include <cstddef>
+#include <exception>
 #include <functional>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace anc_test {
@@ -34,7 +37,7 @@ namespace anc_test {
 
     struct Registrar {
         Registrar(const char* name, std::function<void()> body) {
-            registry().push_back({name std::move(body)});
+            registry().push_back({name, std::move(body)});
         }
     };
 
@@ -47,12 +50,18 @@ namespace anc_test {
         int failed_tests = 0;
         for (const auto& test : registry()) {
             const int before = failures();
-            test.body();
+            try {
+                test.body();
+            } catch (const std::exception& e) {
+                report("<test>", 0, std::string("uncaught exception: ") + e.what());
+            } catch (...) {
+                report("<test>", 0, "uncaught non-standard exception");
+            }
             const bool ok = failures() == before;
             failed_tests += ok ? 0 : 1;
             std::cout << (ok ? "[PASS] " : "[FAIL] ") << test.name << "\n";
         }
-        std::cout << registry().size() - failed_tests << "/" << registry().size()
+        std::cout << registry().size() - static_cast<std::size_t>(failed_tests) << "/" << registry().size()
             << " tests passed\n";
         return failed_tests == 0 ? 0 : 1;
     }
@@ -82,20 +91,20 @@ namespace anc_test {
             if (!(std::fabs(anc_a - anc_e) <= (tolerance))) {       \
                 anc_test::report(__FILE__, __LINE__,                \
                 std::string(#actual " = ") + std::to_string(anc_a) +    \
-                ",expexted " + std::to_string(anc_e))               \
+                ", expected " + std::to_string(anc_e));             \
             }                                                       \
-        } while(0)
+        } while (0)
 
-        #define CHECK_THROWS(expression)                    \
-            do {
-                bool anc_threw = false;         \
-                try {                           \
-                    (void)(expression);     \
-                } catch (...) {                 \
-                    anc_threw =true;        \
-                }                           \
-                if (!anc_threw) {               \
-                    anc_test::report(__FILE__, __LINE__,    \
-                        "expected exception: " #expression);)   \
-                }                           \
-            } while(0)
+#define CHECK_THROWS(expression)                                    \
+        do {                                                        \
+            bool anc_threw = false;                                 \
+            try {                                                   \
+                (void)(expression);                                 \
+            } catch (...) {                                         \
+                anc_threw = true;                                   \
+            }                                                       \
+            if (!anc_threw) {                                       \
+                anc_test::report(__FILE__, __LINE__,                \
+                    "expected exception: " #expression);            \
+            }                                                       \
+        } while (0)
