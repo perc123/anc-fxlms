@@ -152,18 +152,36 @@ the loop.
 | μ finite and > 0 | ✓ | ✓ | ✓ |
 | D̂ ≥ 0 | ✓ | ✓ | by type (`size_t`) |
 | Ŝ non-empty | ✓ | ✓ | ✓ |
-| Ŝ finite | ✓ | ✓ | ✗ |
-| x[n], e[n] finite | ✓ (reference, residual) | ✗ | ✗ |
-| Residual amplitude limit | ✓ | ✗ | ✗ |
-| Weight-norm limit | ✓ | ✗ | ✗ |
-| Non-finite weights detected | ✓ | ✗ | ✗ |
+| Ŝ finite | ✓ | ✓ | ✓ |
+| x[n], e[n] finite | ✓ (reference, residual) | ✓ | ✓ |
+| Residual amplitude limit | ✓ | ✓ | ✓ |
+| Weight-norm limit | ✓ | ✓ | ✓ |
+| Non-finite weights detected | ✓ | ✓ | ✓ |
+| Non-finite output detected | ✓ (via the residual check) | ✓ | ✓ |
 
 On divergence, the batch harness stops, marks the run "diverged", records
 the reason and sample, and leaves NaN in the unprocessed tail.
 
-**Known gap:** the streaming reference and the C++ port have no safety
-behaviour. Defining it (detection, and what `process()` returns afterwards)
-is the next planned change.
+### 8.1 Streaming fault behaviour (streaming reference and C++)
+
+Checks, in order:
+
+1. x[n] and e[n] finite; |e[n]| ≤ max_abs_error. Checked before any state
+   change.
+2. After the update: the squared weight norm is finite and
+   ‖w‖² ≤ max_weight_norm². On failure the weights are restored to their
+   values before the update.
+3. y[n] finite.
+
+The first failed check latches the controller: `fault` and `fault_sample`
+(0-based call index) are recorded, every later call returns 0 and changes no
+state, and only `reset()` clears the fault. Limits default to disabled
+(None in Python, infinity in C++); the non-finite checks are always active.
+`process()` never throws and, in C++, never allocates.
+
+Fault names are identical in both languages: `none`, `non_finite_input`,
+`error_limit`, `weights_not_finite`, `weight_norm_limit`,
+`output_not_finite`.
 
 ## Appendix: direct-error LMS (not ported)
 

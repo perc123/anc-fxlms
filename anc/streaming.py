@@ -30,14 +30,41 @@ implementation sample for sample.
 See docs/algorithm_specification.md, section 5.2.
 """
 
+from enum import Enum
 import numpy as np
 
 from anc.plant import ANCPlant
 from anc.types import FloatArray
 
 
+class Fault(str, Enum):
+    """Why the controller stopped adapting. Values match the C++ to_string()."""
+
+    NONE = "none"
+    NON_FINITE_INPUT = "non_finite_input"
+    ERROR_LIMIT = "error_limit"
+    WEIGHTS_NOT_FINITE = "weights_not_finite"
+    WEIGHT_NORM_LIMIT = "weight_norm_limit"
+    OUTPUT_NOT_FINITE = "output_not_finite"
+
+
+def _validate_limit(name: str, value: float | None) -> float:
+    """Map None to infinity (disabled); reject NaN, zero and negative limits."""
+    if value is None:
+        return float("inf")
+    if not value > 0:   # False for NaN, zero and negative values
+        raise ValueError(f"{name} must be positive, or None to disable it.")
+    return float(value)
+
+
 class StreamingFxLMS:
-    """Controller and secondary-path estimate S_hat, processed per sample."""
+    """Controller and secondary-path estimate S_hat, processed per sample.
+
+    Fault behaviour (algorithm specification, section 8.1): the first failed
+    check latches the controller. From then on process() returns 0 and changes
+    no state until reset(). If the weight check fails, the weights are restored
+    to their values before that update.
+    """
 
     def __init__(
             self,
@@ -46,6 +73,8 @@ class StreamingFxLMS:
             estimated_secondary_taps: FloatArray,
             estimated_secondary_delay_samples: int = 0,
             dtype: type[np.floating] = np.float64,
+            max_abs_error: float | None = None,
+            max_weight_norm: float | None = None,
     ) -> None:
         if filter_length < 1:
             raise ValueError("filter_length must be positive.")
@@ -69,6 +98,9 @@ class StreamingFxLMS:
         self.step_size = dtype(step_size)
         self.s_hat = s_hat.copy()
         self.s_hat_delay = estimated_secondary_delay_samples
+        self.max_abs_error = _validate_limit("max_abs_error", max_abs_error)
+        self.max_weight_norm = _validate_limit("max_weight_norm", max_weight_norm)
+        self._max_weight_norm_sq = self.max_weight_norm ** 2
         self.reset()
 
     def reset(self) -> None:
@@ -80,10 +112,33 @@ class StreamingFxLMS:
         self._s_in_hist = np.zeros(
             self.s_hat_delay + self.s_hat.size, dtype=dtype
         )
+        self.fault = Fault.NONE
+        self.fault_sample = 0
+        self.samples_processed = 0
+
+    @property
+    def diverged(self) -> bool:
+        return self.fault is not Fault.NONE
+
+    def _latch(self, fault: Fault, n: int) -> float:
+        self.fault = fault
+        self.fault_sample = n
+        return 0.0
 
     def process(self, x: float, e: float) -> float:
         """Consume x[n] and e[n], return the control sample y[n]."""
         dtype = self.dtype
+        n = self.samples_processed
+        self.samples_processed += 1
+
+        if self.diverged:
+            return 0.0   # latched: silence until reset()
+
+        # 0. Input checks. A faulted call changes no state except the fault.
+        if not (np.isfinite(x) and np.isfinite(e)):
+            return self._latch(Fault.NON_FINITE_INPUT, n)
+        if abs(e) > self.max_abs_error:
+            return self._latch(Fault.ERROR_LIMIT, n)
 
         # 1. Push the new reference sample and its filtered version.
         self._x_hist[1:] = self._x_hist[:-1]
@@ -98,10 +153,24 @@ class StreamingFxLMS:
         self._xf_hist[0] = x_filtered
 
         # 2. Update: e[n] is paired with x'[n], so this follows the push.
-        self.weights -= (self.step_size * dtype(e)) * self._xf_hist
+        previous_weights = self.weights.copy()
+        with np.errstate(over="ignore", invalid="ignore"):
+            self.weights -= (self.step_size * dtype(e)) * self._xf_hist
+            norm_sq = float(np.dot(self.weights, self.weights))
+
+        if not np.isfinite(norm_sq):
+            self.weights = previous_weights
+            return self._latch(Fault.WEIGHTS_NOT_FINITE, n)
+        if norm_sq > self._max_weight_norm_sq:
+            self.weights = previous_weights
+            return self._latch(Fault.WEIGHT_NORM_LIMIT, n)
 
         # 3. Controller output.
-        return float(np.dot(self.weights, self._x_hist))
+        with np.errstate(over="ignore", invalid="ignore"):
+            y = float(np.dot(self.weights, self._x_hist))
+        if not np.isfinite(y):
+            return self._latch(Fault.OUTPUT_NOT_FINITE, n)
+        return y
 
 
 def run_streaming_closed_loop(
