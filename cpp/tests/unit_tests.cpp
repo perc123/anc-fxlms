@@ -160,4 +160,132 @@ TEST_CASE("reset restores the initial state") {
     CHECK_NEAR(controller.weights()[1], 0.0, kExact);
 }
 
+// ---------------------------------------------------------------------------
+// Fault behaviour (spec section 8.1). Each scenario has a Python twin in
+// tests/test_streaming_faults.py with the same inputs and expectations.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Default limits: a healthy run reports no fault") {
+    anc::FxLMS controller(2, 0.1f, {1.0f});
+    controller.process(1.0f, 0.5f);
+    controller.process(2.0f, 1.0f);
+    CHECK(!controller.diverged());
+    CHECK(controller.fault() == anc::Fault::None);
+    CHECK(controller.samples_processed() == 2);
+}
+
+TEST_CASE("NaN error latches non_finite_input and leaves the weights untouched") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    anc::FxLMS controller(2, 0.1f, {1.0f});
+    controller.process(1.0f, 0.5f);           // n = 0: w = [-0.05, 0]
+    const float y = controller.process(2.0f, nan);   // n = 1: fault
+
+    CHECK(y == 0.0f);
+    CHECK(controller.diverged());
+    CHECK(controller.fault() == anc::Fault::NonFiniteInput);
+    CHECK(controller.fault_sample() == 1);
+    CHECK_NEAR(controller.weights()[0], -0.05, kExact);
+    CHECK_NEAR(controller.weights()[1], 0.0, kExact);
+}
+
+TEST_CASE("Infinite reference latches non_finite_input") {
+    const float inf = std::numeric_limits<float>::infinity();
+    anc::FxLMS controller(2, 0.1f, {1.0f});
+    CHECK(controller.process(inf, 0.5f) == 0.0f);
+    CHECK(controller.fault() == anc::Fault::NonFiniteInput);
+    CHECK(controller.fault_sample() == 0);
+}
+
+TEST_CASE("Error above the limit latches error_limit before any update") {
+    anc::Limits limits;
+    limits.max_abs_error = 10.0f;
+    anc::FxLMS controller(2, 0.1f, {1.0f}, 0, limits);
+
+    controller.process(1.0f, 0.5f);                    // n = 0: fine
+    CHECK(controller.process(1.0f, 10.0f) != 0.0f);    // n = 1: |e| = limit is allowed
+    const auto w_before = controller.weights();
+    CHECK(controller.process(1.0f, -10.5f) == 0.0f);   // n = 2: |e| > limit
+
+    CHECK(controller.fault() == anc::Fault::ErrorLimit);
+    CHECK(controller.fault_sample() == 2);
+    CHECK(controller.weights() == w_before);
+}
+
+TEST_CASE("Weight norm above the limit restores the previous weights") {
+    // L = 1, mu = 1, S_hat = [1], x = 1, e = -4: w grows 4, 8, 12, ...
+    // With max_weight_norm = 10 the update at n = 2 (w = 12) is rejected.
+    anc::Limits limits;
+    limits.max_weight_norm = 10.0f;
+    anc::FxLMS controller(1, 1.0f, {1.0f}, 0, limits);
+
+    CHECK_NEAR(controller.process(1.0f, -4.0f), 4.0, kExact);   // n = 0
+    CHECK_NEAR(controller.process(1.0f, -4.0f), 8.0, kExact);   // n = 1
+    CHECK(controller.process(1.0f, -4.0f) == 0.0f);             // n = 2
+
+    CHECK(controller.fault() == anc::Fault::WeightNormLimit);
+    CHECK(controller.fault_sample() == 2);
+    CHECK_NEAR(controller.weights()[0], 8.0, kExact);   // restored
+}
+
+TEST_CASE("Overflowing weights latch weights_not_finite and are restored") {
+    // mu * e * x' overflows float32 on the first update.
+    anc::FxLMS controller(1, 1.0f, {1.0f});
+    CHECK(controller.process(3.0e38f, -3.0e38f) == 0.0f);
+    CHECK(controller.fault() == anc::Fault::WeightsNotFinite);
+    CHECK(controller.weights()[0] == 0.0f);
+}
+
+TEST_CASE("A latched controller outputs silence and changes no state") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    anc::FxLMS controller(2, 0.1f, {1.0f});
+    controller.process(1.0f, 0.5f);
+    controller.process(1.0f, nan);   // n = 1: fault
+    const auto w_latched = controller.weights();
+
+    for (int i = 0; i < 5; ++i) {
+        CHECK(controller.process(1.0f, 0.5f) == 0.0f);   // healthy inputs
+    }
+    CHECK(controller.weights() == w_latched);
+    CHECK(controller.fault_sample() == 1);   // the first fault is kept
+    CHECK(controller.samples_processed() == 7);
+}
+
+TEST_CASE("reset clears the fault") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    anc::FxLMS controller(2, 0.1f, {1.0f});
+    controller.process(nan, 0.5f);
+    CHECK(controller.diverged());
+
+    controller.reset();
+    CHECK(!controller.diverged());
+    CHECK(controller.samples_processed() == 0);
+    CHECK_NEAR(controller.process(1.0f, 0.5f), -0.05, kExact);   // as fresh
+}
+
+TEST_CASE("Constructor rejects non-finite S_hat and invalid limits") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    CHECK_THROWS(anc::FxLMS(2, 0.1f, {1.0f, nan}));
+
+    anc::Limits zero_error;
+    zero_error.max_abs_error = 0.0f;
+    CHECK_THROWS(anc::FxLMS(2, 0.1f, {1.0f}, 0, zero_error));
+
+    anc::Limits nan_norm;
+    nan_norm.max_weight_norm = nan;
+    CHECK_THROWS(anc::FxLMS(2, 0.1f, {1.0f}, 0, nan_norm));
+
+    anc::Limits negative_norm;
+    negative_norm.max_weight_norm = -1.0f;
+    CHECK_THROWS(anc::FxLMS(2, 0.1f, {1.0f}, 0, negative_norm));
+}
+
+TEST_CASE("Fault names match the Python twin") {
+    CHECK(std::string(anc::to_string(anc::Fault::None)) == "none");
+    CHECK(std::string(anc::to_string(anc::Fault::NonFiniteInput)) == "non_finite_input");
+    CHECK(std::string(anc::to_string(anc::Fault::ErrorLimit)) == "error_limit");
+    CHECK(std::string(anc::to_string(anc::Fault::WeightsNotFinite)) == "weights_not_finite");
+    CHECK(std::string(anc::to_string(anc::Fault::WeightNormLimit)) == "weight_norm_limit");
+    CHECK(std::string(anc::to_string(anc::Fault::OutputNotFinite)) == "output_not_finite");
+}
+
 int main() { return anc_test::run_all(); }
