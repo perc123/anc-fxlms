@@ -67,7 +67,7 @@ public:
     Fault fault() const { return fault_; }
     // Index of the call (0-based) on which the fault was detected.
     std::uint64_t fault_sample() const { return fault_sample_; }
-    std::uint64_t samples_processed() const { return sample_processed_; }
+    std::uint64_t samples_processed() const { return samples_processed_; }
 
 private:
     float latch(Fault fault, std::uint64_t n);
