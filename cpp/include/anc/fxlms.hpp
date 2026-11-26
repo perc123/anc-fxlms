@@ -13,7 +13,7 @@ namespace anc {
 // (anc.streaming.Fault) via to_string().
 enum class Fault {
     None,
-    NoneFiniteInput,    // x[n] or e[n] is NaN ot finite
+    NonFiniteInput,    // x[n] or e[n] is NaN ot finite
     ErrorLimit,         // |e[n]| exceeded Limits::max_abs_error
     WeightsNotFinite,   // a weight, or the squared weight norm, is not finite
     WeightNormLimit,    // ||w|| exceeded Limits::max_weight_norm
