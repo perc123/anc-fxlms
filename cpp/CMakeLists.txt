@@ -31,6 +31,7 @@ add_test(NAME unit COMMAND anc_unit_tests)
 
 add_executable(anc_golden_tests tests/golden_tests.cpp)
 target_link_libraries(anc_golden_tests PRIVATE anc_fxlms)
+target_compile_options(anc_cli PRIVATE -Wall -Wextra -Wpedantic)
 target_compile_options(anc_golden_tests PRIVATE -Wall -Wextra -Wpedantic)
 add_test(NAME golden
          COMMAND anc_golden_tests ${CMAKE_CURRENT_SOURCE_DIR}/../tests/golden)

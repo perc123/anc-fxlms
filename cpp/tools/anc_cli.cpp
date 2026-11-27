@@ -30,6 +30,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "anc/fxlms.hpp"
@@ -64,7 +65,7 @@ std::string trim(const std::string& text) {
     return text.substr(first, last - first + 1);
 }
 
-// Parses the whole string as a doule, or returns false.
+// Parses the whole string as a double, or returns false.
 // std::stod alone would accept "12abc" as 12.
 bool try_parse_double(const std::string& raw, double& value) {
     const std::string text = trim(raw);
@@ -80,7 +81,7 @@ bool try_parse_double(const std::string& raw, double& value) {
     }
 }
 
-double option_double(const std::string& name,const std::string& text) {
+double option_double(const std::string& name, const std::string& text) {
     double value = 0.0;
     if (!try_parse_double(text, value)) {
         throw UsageError(name + ": not a number: '" + text + "'");
@@ -107,6 +108,10 @@ std::vector<float> option_float_list(const std::string& name, const std::string&
     std::string item;
     while (std::getline(stream, item, ',')) {
         values.push_back(static_cast<float>(option_double(name, item)));
+    }
+    // getline does not report an empty item after a final comma ("1,2,").
+    if (!text.empty() && text.back() == ',') {
+        throw UsageError(name + ": trailing comma in list: '" + text + "'");
     }
     if (values.empty()) {
         throw UsageError(name + ": empty list");
@@ -177,16 +182,16 @@ int run(const std::map<std::string, std::string>& args) {
             static_cast<float>(option_double("--max-abs-error", args.at("--max-abs-error")));
     }
     if (args.count("--max-weight-norm")) {
-        limits.max_weight_norm = 
+        limits.max_weight_norm =
             static_cast<float>(option_double("--max-weight-norm", args.at("--max-weight-norm")));
     }
 
     const std::size_t length = option_size("--length", args.at("--length"));
     const float mu = static_cast<float>(option_double("--mu", args.at("--mu")));
     std::vector<float> s_hat = option_float_list("--shat", args.at("--shat"));
-    const std::size_t delay = 
+    const std::size_t delay =
         args.count("--delay") ? option_size("--delay", args.at("--delay")) : 0;
-    
+
     // The constructor validates the values; report its message as a usage error.
     std::unique_ptr<anc::FxLMS> controller;
     try {
@@ -243,17 +248,17 @@ int run(const std::map<std::string, std::string>& args) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc == 2 && std::string(argv[1]) == "help"){
+    if (argc == 2 && std::string(argv[1]) == "--help") {
         std::cout << kUsage;
         return kExitOk;
     }
     try {
         return run(parse_args(argc, argv));
     } catch (const UsageError& error) {
-        std::cerr << "error: " <<error.what() << "\n" << kUsage;
+        std::cerr << "error: " << error.what() << "\n" << kUsage;
         return kExitUsage;
     } catch (const InputError& error) {
-        std::cerr << "error: " <<error.what() << "\n";
+        std::cerr << "error: " << error.what() << "\n";
         return kExitRuntime;
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << "\n";
