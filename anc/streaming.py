@@ -62,8 +62,9 @@ class StreamingFxLMS:
 
     Fault behaviour (algorithm specification, section 8.1): the first failed
     check latches the controller. From then on process() returns 0 and changes
-    no state until reset(). If the weight check fails, the weights are restored
-    to their values before that update.
+    no state, apart from the call counter samples_processed, until reset().
+    If the weight check fails, the weights are restored to their values
+    before that update.
     """
 
     def __init__(
@@ -134,7 +135,7 @@ class StreamingFxLMS:
         if self.diverged:
             return 0.0   # latched: silence until reset()
 
-        # 0. Input checks. A faulted call changes no state except the fault.
+        # 0. Input checks. A faulted call changes no state except the fault and the counter.
         if not (np.isfinite(x) and np.isfinite(e)):
             return self._latch(Fault.NON_FINITE_INPUT, n)
         if abs(e) > self.max_abs_error:

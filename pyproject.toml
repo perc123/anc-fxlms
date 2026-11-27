@@ -17,6 +17,10 @@ dependencies = [
 dev = [
     "pytest==8.4.1",
 ]
+# Only for experiments/post2_clip.py (which also needs ffmpeg on PATH).
+clips = [
+    "scipy>=1.15",
+]
 
 [tool.setuptools.packages.find]
 include = ["anc*"]

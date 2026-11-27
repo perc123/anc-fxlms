@@ -23,10 +23,10 @@ namespace {
 
 // A limit is valid if it is positive (infinity included) and not NaN.
 bool valid_limit(float limit) {
-    return limit > 0.0f; // false for NaN, zero and negative values
+    return limit > 0.0f;   // false for NaN, zero and negative values
 }
 
-} // namespace
+}  // namespace
 
 FxLMS::FxLMS(std::size_t filter_length,
              float step_size,
@@ -38,7 +38,8 @@ FxLMS::FxLMS(std::size_t filter_length,
       s_hat_(std::move(secondary_taps_estimate)),
       s_hat_delay_(secondary_delay_estimate),
       limits_(limits),
-      max_weight_norm_sq_(limits.max_weight_norm * limits.max_weight_norm) {
+      max_weight_norm_sq_(static_cast<double>(limits.max_weight_norm) *
+                          static_cast<double>(limits.max_weight_norm)) {
     if (filter_length_ < 1) {
         throw std::invalid_argument("filter_length must be positive");
     }
@@ -50,9 +51,10 @@ FxLMS::FxLMS(std::size_t filter_length,
     }
     if (!std::all_of(s_hat_.begin(), s_hat_.end(), [](float tap) { return std::isfinite(tap); })) {
         throw std::invalid_argument("secondary-path estimate must be finite");
-                    }
-    if (!valid_limit(limits_.max_abs_error) || !valid_limit(limits_.max_weight_norm))
+    }
+    if (!valid_limit(limits_.max_abs_error) || !valid_limit(limits_.max_weight_norm)) {
         throw std::invalid_argument("limits must be positive (or infinity)");
+    }
     reset();
 }
 
@@ -76,11 +78,11 @@ float FxLMS::latch(Fault fault, std::uint64_t n) {
 float FxLMS::process(float x, float e) {
     const std::uint64_t n = samples_processed_++;
 
-        if (fault_ != Fault::None) {
+    if (fault_ != Fault::None) {
         return 0.0f;   // latched: silence until reset()
     }
 
-    // 0. Input checks. A faulted call changes no state except the fault.
+    // 0. Input checks. A faulted call changes no state except the fault and the counter.
     if (!std::isfinite(x) || !std::isfinite(e)) {
         return latch(Fault::NonFiniteInput, n);
     }
@@ -115,7 +117,7 @@ float FxLMS::process(float x, float e) {
         return latch(Fault::WeightsNotFinite, n);
     }
     // Compare squared values: no sqrt per sample.
-    if (norm_sq > max_weight_norm_sq_) {
+    if (static_cast<double>(norm_sq) > max_weight_norm_sq_) {
         weights_.swap(previous_weights_);
         return latch(Fault::WeightNormLimit, n);
     }

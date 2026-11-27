@@ -158,3 +158,15 @@ def test_weight_norm_limit_from_the_command_line(cli, tmp_path):
     assert result.returncode == 3
     assert "fault=weight_norm_limit fault_sample=2" in result.stdout
     np.testing.assert_allclose(np.loadtxt(tmp_path / "w.csv", ndmin=1), [8.0])
+
+def test_absurd_length_is_usage_error(cli, tmp_path):
+    result = run_cli(cli, tmp_path, "1,0\n", base=["--length", "99999999999999",
+                                                  "--mu", "0.1", "--shat", "1.0"])
+    assert result.returncode == 2
+    assert "out of range" in result.stderr
+
+
+def test_trailing_comma_in_shat_is_usage_error(cli, tmp_path):
+    result = run_cli(cli, tmp_path, "1,0\n", base=["--length", "2",
+                                                  "--mu", "0.1", "--shat", "1.0,"])
+    assert result.returncode == 2

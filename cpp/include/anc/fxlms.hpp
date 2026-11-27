@@ -13,17 +13,17 @@ namespace anc {
 // (anc.streaming.Fault) via to_string().
 enum class Fault {
     None,
-    NonFiniteInput,    // x[n] or e[n] is NaN ot finite
+    NonFiniteInput,    // x[n] or e[n] is NaN or infinite
     ErrorLimit,         // |e[n]| exceeded Limits::max_abs_error
     WeightsNotFinite,   // a weight, or the squared weight norm, is not finite
     WeightNormLimit,    // ||w|| exceeded Limits::max_weight_norm
-    OutputNotFinite,    // y[n] is NaN or infinite 
+    OutputNotFinite,    // y[n] is NaN or infinite
 };
 
 const char* to_string(Fault fault);
 
 // Optional safety limits. The defaults (infinity) disable both checks, which
-// reproduces the unprotected constoller exactly.
+// reproduces the unprotected controller exactly.
 struct Limits {
     float max_abs_error = std::numeric_limits<float>::infinity();
     float max_weight_norm = std::numeric_limits<float>::infinity();
@@ -40,9 +40,10 @@ struct Limits {
 //   2. updates the weights with e[n] against the history ending at x'[n],
 //   3. returns y[n] = w . x_hist.
 //
-// Fault behaviour: the first failed check latches the controller in the 
-// diverged state. From then on process() returns = 0 (silence for the
-// secondary speaker) and changes no state until reset(). If the weight check
+// Fault behaviour: the first failed check latches the controller in the
+// diverged state. From then on process() returns 0 (silence for the
+// secondary speaker) and changes no state, apart from the call counter
+// samples_processed(), until reset(). If the weight check
 // fails, the weights are restored to their values before that update.
 // process() never allocates and never throws.
 //
@@ -63,7 +64,7 @@ public:
     const std::vector<float>& weights() const { return weights_; }
     std::size_t filter_length() const { return filter_length_; }
 
-    bool diverged() const { return fault_ != Fault::None;}
+    bool diverged() const { return fault_ != Fault::None; }
     Fault fault() const { return fault_; }
     // Index of the call (0-based) on which the fault was detected.
     std::uint64_t fault_sample() const { return fault_sample_; }
@@ -77,7 +78,7 @@ private:
     std::vector<float> s_hat_;
     std::size_t s_hat_delay_;
     Limits limits_;
-    float max_weight_norm_sq_;
+    double max_weight_norm_sq_;   // double: squaring a float limit can overflow
 
     std::vector<float> weights_;
     std::vector<float> previous_weights_;

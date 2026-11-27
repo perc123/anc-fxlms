@@ -23,5 +23,8 @@ jobs:
           cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
           cmake --build cpp/build
 
+      - name: C++ unit and golden tests
+        run: ctest --test-dir cpp/build --output-on-failure
+
       - name: Test (includes C++ parity)
         run: pytest -q

@@ -125,8 +125,8 @@ The caller supplies e[n], which reflects outputs up to y[n−1].
 | Python (both) | float64 | NumPy dot product |
 | C++ | float32 | k = 0, 1, ..., K−1 |
 
-Rationale for float32 in C++: **Precision decision (open).** The C++ port currently uses float32. Measured
-on the golden vectors, float32 drift from float64 is −106 to −110 dB relative
+**Precision decision (open).** The C++ port currently uses float32. Rationale:
+measured on the golden vectors, float32 drift from float64 is −106 to −110 dB relative
 to RMS(y), about 45 dB below the 60 dB sensor floor assumed in the results,
 and steady-state weight updates exceed the float32 resolution at the largest
 weight by about 1300×, so adaptation does not stall. float32 matches typical
@@ -175,7 +175,7 @@ Checks, in order:
 
 The first failed check latches the controller: `fault` and `fault_sample`
 (0-based call index) are recorded, every later call returns 0 and changes no
-state, and only `reset()` clears the fault. Limits default to disabled
+state (only the call counter `samples_processed` keeps counting), and only `reset()` clears the fault. Limits default to disabled
 (None in Python, infinity in C++); the non-finite checks are always active.
 `process()` never throws and, in C++, never allocates.
 

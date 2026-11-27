@@ -17,36 +17,53 @@ reference ──► Controller ──► secondary path ──► anti-noise ─
 ```text
 anc/                  Core DSP library
   plant.py            ANCPlant: primary and secondary path FIR models
-  controllers.py      FixedFIRController + offline least-squares design
-  signals.py          Tone mixture and white-noise signal generation
+  controllers.py      FixedFIRController (offline least-squares design),
+                      LMSController, FxLMSController
+  signals.py          Tone mixture, white noise and band-limited noise
   adaptive.py         run_lms(): direct-error LMS loop
   fxlms.py            run_fxlms(): batch FxLMS loop with divergence checks
-  streaming.py        StreamingFxLMS: per-sample reference for the C++ port
+  streaming.py        StreamingFxLMS: per-sample reference for the C++ port,
+                      with fault latching and safety limits
+  measurement.py      Error-microphone noise model and true-vs-measured
+                      attenuation (floor_report)
+  golden.py           Frozen golden test vectors (python -m anc.golden --write)
   simulate.py         run(): fixed-controller simulation loop
   metrics.py          rms(), attenuation_db()
   convergence.py      analyze_convergence(): block RMS, steady-state
                       attenuation, convergence time
   types.py            Shared FloatArray type alias
 
-experiments/          Numbered experiment scripts
-  step1_fixed_baseline.py   Offline FIR controller (least-squares)
-  step2_lms.py              Online LMS adaptive controller
-  step3_fxlms_mismatch.py   FxLMS with secondary-path mismatch
-  step3_causality_sweep.py  FxLMS versus causality margin (primary delay
-                            minus secondary delay)
+experiments/          Experiment scripts (each reads a YAML config)
+  step1_fixed_baseline.py     Offline FIR controller (least-squares)
+  step2_lms.py                Online LMS adaptive controller
+  step2_lms_step_size_sweep.py  LMS step-size sweep (several SNR configs)
+  step2_lms_unstable.py       LMS beyond the stability limit
+  step2_signal_variants.py    LMS on single tone, multi-tone, white and
+                              band-limited noise
+  step3_fxlms_mismatch.py     FxLMS with secondary-path mismatch
+  step3_causality_sweep.py    FxLMS versus causality margin (primary delay
+                              minus secondary delay)
   step3_phase_error_sweep.py  FxLMS versus secondary-path phase error
-                            (estimated-delay sweep at one tone)
-  step4_benchmark.py        Comparative benchmark across controllers
-  plotting.py               Shared plotting helpers
+                              (estimated-delay sweep at one tone)
+  step4_benchmark.py          Comparative benchmark across controllers
+  plotting.py                 Shared plotting helpers
+  post1_clip.py, post2_clip.py  Animated clips for write-ups (need ffmpeg;
+                              post2_clip.py also needs SciPy:
+                              `pip install -e ".[clips]"`)
 
-configs/              YAML configuration files (one per experiment)
-tests/                pytest suite
+configs/              YAML configuration files (one per experiment run)
+tests/                pytest suite (Python, C++ CLI and C++ parity)
+  golden/             Frozen golden vectors shared by Python and C++ tests
 cpp/                  C++ port of the FxLMS controller + S_hat filter (CMake)
+  include/, src/      anc::FxLMS library
+  tools/anc_cli.cpp   Command-line driver used by the parity tests
+  tests/              C++ unit tests and golden-vector runner
+  bench/              Per-sample timing benchmark
+docs/                 algorithm_specification.md, results.md, figures/
 realtime/             Placeholders for secondary-path measurement and live
-                      ANC (empty, not implemented yet)
+                      ANC (empty files, not implemented yet)
 .github/workflows/    CI: build the C++ port and run pytest
 results/              Generated outputs (gitignored)
-docs/figures/         Generated figures
 ```
 
 ## Installation
@@ -61,11 +78,17 @@ pip install -e ".[dev]"
 
 ## Running experiments
 
-Each experiment reads a YAML config and writes results to `results/`.
+Each experiment reads a YAML config and writes results to `results/` and
+figures to `docs/figures/`. Experiments with a `--config` option (all except
+step 1, the unstable-LMS run and the clips) accept an alternative file, for
+example `configs/step2_lms_step_size_sweep_snr60.yaml`.
 
 ```bash
 python -m experiments.step1_fixed_baseline
 python -m experiments.step2_lms
+python -m experiments.step2_lms_step_size_sweep
+python -m experiments.step2_lms_unstable
+python -m experiments.step2_signal_variants
 python -m experiments.step3_fxlms_mismatch
 python -m experiments.step3_causality_sweep
 python -m experiments.step3_phase_error_sweep
@@ -181,23 +204,59 @@ updates in the same step, so its y[n] uses weights one update older; it has the
 same stability window, and `tests/test_streaming_phase_sweep.py` checks that
 the streaming path reproduces it.
 
+Safety: the controller latches on the first fault (non-finite input, error
+above `max_abs_error`, non-finite or oversized weights, non-finite output) and
+returns 0 until `reset()`. Both limits are optional and disabled by default.
+Python and C++ use the same fault names. See
+[docs/algorithm_specification.md](docs/algorithm_specification.md), section 8.1.
+
+### Build and test
+
 ```bash
 cmake -S cpp -B cpp/build && cmake --build cpp/build
-pytest tests/test_cpp_parity.py
+ctest --test-dir cpp/build --output-on-failure   # C++ unit + golden tests
+pytest tests/test_cpp_parity.py tests/test_cli.py
 ```
 
-The parity test is open-loop. Python simulates the loop once, records x and e
-under `tests/data/`, and both implementations consume those same sequences,
-so float32 differences cannot compound through the feedback path. It compares
-y[n] and the final weights. The tolerance is derived from running the Python
-reference in float32 once: the C++ error against float64 must stay within 3x
-of that float32-vs-float64 drift (about 2.4e-6 on y for this configuration).
+### Command-line driver
+
+`anc_cli` runs the C++ controller open loop over an `x,e` CSV file (an
+optional `x,e` header line is skipped):
+
+```bash
+cpp/build/anc_cli --input tests/golden/short_debug/input.csv \
+    --output-y y.csv --output-weights w.csv \
+    --length 4 --mu 0.05 --shat 0.7,0.2 --delay 1 \
+    [--max-abs-error E] [--max-weight-norm W]
+```
+
+It prints `fault=<name> fault_sample=<n> samples=<n>`. Exit codes: 0 ok,
+1 runtime error, 2 usage error, 3 controller fault (outputs are still
+written). `cpp/build/bench_fxlms` reports nanoseconds per sample.
+
+### Golden vectors and parity
+
+The parity test is open loop. Python simulates the loop once and records x
+and e as golden vectors under `tests/golden/` (three cases: `short_debug`,
+`tone_mixture`, `tone_mixture_snr40`). Both implementations consume those
+same sequences, so float32 differences cannot compound through the feedback
+path. The tests compare y[n] and the final weights. The tolerance is stored
+with each case and derived from running the Python reference in float32: the
+C++ error against float64 must stay within 3x of that float32-vs-float64
+drift, with an absolute floor of 1e-7. The C++ golden runner
+(`anc_golden_tests`) checks the same files without Python. The files are the
+contract: regenerate them only deliberately, with
+`python -m anc.golden --write`.
 
 ## Tests
 
 ```bash
 pytest
 ```
+
+The suite includes the C++ parity and CLI tests, which build `anc_cli` with
+CMake in a temporary directory and are skipped when `cmake` is not installed.
+CI runs the same `pytest` after building the C++ port.
 
 ## Experiment steps
 
@@ -210,6 +269,14 @@ pytest
 | 3 | FxLMS phase-error sweep | `configs/step3_phase_error_sweep.yaml` |
 | 4 | Benchmark | `configs/benchmark.yaml` |
 
+Additional configs: `step2_lms_step_size_sweep*.yaml` (step-size sweeps at
+several SNRs), `step2_lms_unstable.yaml` and `step2_signal_variants.yaml`.
+
+## Further reading
+
+- [docs/algorithm_specification.md](docs/algorithm_specification.md): the FxLMS definition shared by Python and C++
+- [docs/results.md](docs/results.md): measurement-floor model and sweep findings
+
 ## Dependencies
 
 | Package | Version |
@@ -217,4 +284,5 @@ pytest
 | numpy | 2.2.6 |
 | matplotlib | 3.10.3 |
 | PyYAML | 6.0.2 |
+| SciPy (`clips` extra) | >=1.15, only for `experiments/post2_clip.py` |
 | pytest (dev) | 8.4.1 |

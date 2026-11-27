@@ -42,6 +42,10 @@ constexpr int kExitRuntime = 1;
 constexpr int kExitUsage = 2;
 constexpr int kExitFault = 3;
 
+// Upper bound for --length and --delay: rejects absurd sizes as a usage error
+// instead of failing later with an allocation error.
+constexpr std::size_t kMaxSize = std::size_t{1} << 24;
+
 const char* const kUsage =
     "usage: anc_cli --input FILE --output-y FILE --output-weights FILE\n"
     "               --length L --mu MU --shat a,b,c [--delay D]\n"
@@ -89,16 +93,22 @@ double option_double(const std::string& name, const std::string& text) {
     return value;
 }
 
-std::size_t option_size(const std::string& name, const std::string& text) {
+std::size_t option_size(const std::string& name, const std::string& text,
+                        std::size_t max_value = kMaxSize) {
     // std::stoul("-1") wraps around to a huge value instead of failing.
     const std::string t = trim(text);
     if (t.empty() || t.find_first_not_of("0123456789") != std::string::npos) {
         throw UsageError(name + ": not a non-negative integer: '" + text + "'");
     }
     try {
-        return static_cast<std::size_t>(std::stoull(t));
+        const unsigned long long value = std::stoull(t);
+        if (value > max_value) {
+            throw std::out_of_range("too large");
+        }
+        return static_cast<std::size_t>(value);
     } catch (const std::exception&) {
-        throw UsageError(name + ": out of range: '" + text + "'");
+        throw UsageError(name + ": out of range (maximum " +
+                         std::to_string(max_value) + "): '" + text + "'");
     }
 }
 
