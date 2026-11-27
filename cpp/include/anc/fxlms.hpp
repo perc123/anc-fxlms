@@ -26,7 +26,7 @@ const char* to_string(Fault fault);
 // reproduces the unprotected constoller exactly.
 struct Limits {
     float max_abs_error = std::numeric_limits<float>::infinity();
-    float max_weights_norm = std::numeric_limits<float>::infinity();
+    float max_weight_norm = std::numeric_limits<float>::infinity();
 };
 
 // Streaming FxLMS controller with its secondary-path estimate S_hat.

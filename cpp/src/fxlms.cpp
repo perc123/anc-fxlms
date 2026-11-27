@@ -38,7 +38,7 @@ FxLMS::FxLMS(std::size_t filter_length,
       s_hat_(std::move(secondary_taps_estimate)),
       s_hat_delay_(secondary_delay_estimate),
       limits_(limits),
-      max_weight_norm_sq_(limits.max_weights_norm * limits.max_weights_norm) {
+      max_weight_norm_sq_(limits.max_weight_norm * limits.max_weight_norm) {
     if (filter_length_ < 1) {
         throw std::invalid_argument("filter_length must be positive");
     }
@@ -51,7 +51,7 @@ FxLMS::FxLMS(std::size_t filter_length,
     if (!std::all_of(s_hat_.begin(), s_hat_.end(), [](float tap) { return std::isfinite(tap); })) {
         throw std::invalid_argument("secondary-path estimate must be finite");
                     }
-    if (!valid_limit(limits_.max_abs_error) || !valid_limit(limits_.max_weights_norm))
+    if (!valid_limit(limits_.max_abs_error) || !valid_limit(limits_.max_weight_norm))
         throw std::invalid_argument("limits must be positive (or infinity)");
     reset();
 }
