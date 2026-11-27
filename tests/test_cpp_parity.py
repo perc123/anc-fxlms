@@ -10,7 +10,6 @@ reference: its drift from float64 is what float32 arithmetic costs on this
 problem, and the C++ port should not be much worse.
 """
 
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -23,28 +22,7 @@ from anc.signals import generate_tone_mixture
 from anc.streaming import StreamingFxLMS, run_streaming_closed_loop
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-
-@pytest.fixture(scope="module")
-def cli(tmp_path_factory) -> Path:
-    if shutil.which("cmake") is None:
-        pytest.skip("cmake is not installed")
-
-    build_dir = tmp_path_factory.mktemp("cpp_build")
-    try:
-        subprocess.run(
-            ["cmake", "-S", str(PROJECT_ROOT / "cpp"), "-B", str(build_dir),
-             "-DCMAKE_BUILD_TYPE=Release"],
-            check=True, capture_output=True, text=True,
-        )
-        subprocess.run(
-            ["cmake", "--build", str(build_dir), "--target", "anc_cli"],
-            check=True, capture_output=True, text=True,
-        )
-    except subprocess.CalledProcessError as error:
-        pytest.fail(f"C++ build failed:\n{error.stdout}\n{error.stderr}")
-
-    return build_dir / "anc_cli"
+GOLDEN_DIR = PROJECT_ROOT / "tests" / "golden"
 
 
 def test_streaming_closed_loop_attenuates_noise():
@@ -95,22 +73,20 @@ def test_cpp_matches_golden_vectors(cli, name, tmp_path):
     y_path = tmp_path / "y.csv"
     w_path = tmp_path / "w.csv"
 
-    # The CLI reads headerless "x,e" lines, so feed it a copy without the header.
-    io_path = tmp_path / "io.csv"
-    np.savetxt(io_path, np.column_stack([golden.x, golden.e]),
-               delimiter=",", fmt="%.17g")
-
-    subprocess.run(
+    # The CLI skips the "x,e" header itself, so the golden file is used as is.
+    result = subprocess.run(
         [str(cli),
-         "--input", str(io_path),
+         "--input", str(GOLDEN_DIR / name / "input.csv"),
          "--output-y", str(y_path),
          "--output-weights", str(w_path),
          "--length", params["filter_length"],
          "--mu", params["step_size"],
          "--shat", params["s_hat_taps"],
          "--delay", params["s_hat_delay"]],
-        check=True, capture_output=True, text=True,
+        capture_output=True, text=True,
     )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("fault=none ")
     y_cpp = np.loadtxt(y_path, ndmin=1)
     w_cpp = np.loadtxt(w_path, ndmin=1)
 
